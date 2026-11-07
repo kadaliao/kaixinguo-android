@@ -124,8 +124,11 @@ class Player internal constructor(
     /** Whether picture in picture shows the video, so leaving the screen keeps it playing. */
     var inPictureInPicture by mutableStateOf(false)
 
-    /** Whether the video is paused, rather than playing or waiting to. */
-    var paused by mutableStateOf(false)
+    /**
+     * Whether the video is paused, rather than playing or waiting to. The
+     * video only tells of changes, so this starts as the video does.
+     */
+    var paused by mutableStateOf(video.status == TimeControl.PAUSED)
         private set
 
     /**
@@ -157,6 +160,12 @@ class Player internal constructor(
     var sleepAt by mutableStateOf<Instant?>(null)
         private set
 
+    /** Whether the viewer has left the app, the episode paused until they come back. */
+    var away by mutableStateOf(false)
+        private set
+    private var playOnReturn by mutableStateOf(false) // it played as they left
+    private var startPaused by mutableStateOf(false) // the episode starting shows without playing
+
     private var start = 0.0 // where to start, in seconds
     private var gen = 0 // tells this start from later ones
     private var pending = false // waits for the series to load
@@ -184,12 +193,17 @@ class Player internal constructor(
 
     // MARK: - Starting an episode
 
-    /** Opens the player on episode n of the series, from start seconds in. */
-    fun play(seriesID: String, n: Int, start: Double = 0.0) {
+    /**
+     * Opens the player on episode n of the series, from start seconds in;
+     * `paused`, it shows the episode there without playing it.
+     */
+    fun play(seriesID: String, n: Int, start: Double = 0.0, paused: Boolean = false) {
         gen++
         this.seriesID = seriesID
         number = n
         this.start = start
+        startPaused = paused
+        away = false // one asked for while away, as from the notification, plays there
         pending = false
         state = PlayerState.Resolving
         isPresented = true
@@ -234,6 +248,7 @@ class Player internal constructor(
         record(sp, number, start, 0.0, finished = false)
         val gen = gen
         val start = start
+        val paused = startPaused
         val f = resolve(ep)
         app.scope.launch {
             val result = f.result.await()
@@ -243,7 +258,11 @@ class Player internal constructor(
                 state = PlayerState.Buffering
                 episodeID = ep.id
                 video.load(item, start)
-                video.play()
+                when {
+                    paused -> {}
+                    away -> playOnReturn = true // the viewer left while it was on its way
+                    else -> video.play()
+                }
                 if (doubleSpeed == DoubleSpeed.HELD) video.speed = DOUBLE_RATE // a finger still down, from the episode before
             } catch (e: CancellationException) {
                 throw e
@@ -395,6 +414,41 @@ class Player internal constructor(
         }
     }
 
+    // MARK: - Leaving the app
+
+    /**
+     * Whether the episode plays, or is on its way to, rather than paused:
+     * what the viewer coming back to the app, or the next launch, goes on with.
+     */
+    val playing: Boolean
+        get() = when {
+            away -> playOnReturn
+            state == PlayerState.Resolving -> !startPaused
+            state == PlayerState.Buffering || state == PlayerState.Playing -> !paused
+            else -> false
+        }
+
+    /**
+     * Pauses the episode as the viewer leaves the app, noting where they got
+     * to and whether it played, so that coming back plays it on.
+     */
+    fun leaveApp() {
+        if (!isPresented || away) return
+        playOnReturn = playing
+        away = true
+        video.pause()
+        progress()
+    }
+
+    /** Plays the episode on as the viewer comes back to the app, if it played as they left. */
+    fun returnToApp() {
+        if (!away) return
+        val play = playOnReturn
+        away = false
+        playOnReturn = false
+        if (play && isPresented && video.hasItem && (state == PlayerState.Buffering || state == PlayerState.Playing)) video.play()
+    }
+
     // MARK: - Double speed while held
 
     /** Starts a press and hold on the video: double speed until it ends, unless double speed is locked on already. */
@@ -432,6 +486,11 @@ class Player internal constructor(
     private fun timeControlChanged() {
         val status = video.status
         paused = status == TimeControl.PAUSED
+        if (away && status != TimeControl.PAUSED) {
+            // Played from the notification or a headset: the viewer has it in hand from there.
+            away = false
+            playOnReturn = false
+        }
         tick(status == TimeControl.PLAYING)
         if (episodeID.isEmpty()) return
         val sp = page ?: return

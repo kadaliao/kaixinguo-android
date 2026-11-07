@@ -68,6 +68,14 @@ class AppModel(
 
     val player = Player(this, video, streams)
 
+    private val sessions = sessionFile(dataDir)
+
+    /** Where the viewer was as the last launch left the app. */
+    val lastSession: Session = sessions.load() ?: Session()
+
+    /** The episode the last launch left the player on, until the launch's first window reopens it. */
+    private var lastPlayer by mutableStateOf(lastSession.player)
+
     init {
         // Last launch's recommendations show at once; fresh ones join them.
         val cached = loadHomeCache()
@@ -76,12 +84,59 @@ class AppModel(
             home.stale = true
         }
         home.onPage = { saveHomeCache(home.cards) }
+
+        val s = lastSession
+        rankContent = s.rankContent
+        rankBoard = s.rankBoard
+        if (s.day == todayKey()) newDate = s.newDate
+        player.chooseSpeed(s.speed)
+        s.quality?.let(player::chooseQuality)
     }
 
     /** Writes what is waiting to be saved, as the app leaves the screen. */
     fun flush() {
         history.flush()
         favorites.flush()
+        sessions.flush()
+    }
+
+    // MARK: - The session
+
+    /**
+     * The model's part of where the viewer is: the chart and day chosen, the
+     * speed and definition, and the episode the player shows. The router
+     * adds the tab and pages before it is saved.
+     */
+    fun session(): Session {
+        val p = player
+        val id = p.seriesID
+        val showing = if (p.isPresented && id != null) SessionPlayer(id, p.number, p.playing) else null
+        return Session(
+            rankContent = rankContent,
+            rankBoard = rankBoard,
+            newDate = newDate,
+            day = todayKey(),
+            speed = p.speed,
+            quality = p.preferredQuality,
+            player = showing ?: lastPlayer, // not reopened yet, it stays for the window to reopen
+        )
+    }
+
+    fun saveSession(s: Session) = sessions.save(s)
+
+    /**
+     * Opens the player where the last launch left it, playing if it played,
+     * from where the viewer got to. The launch's first window asks, and only
+     * it: a later one finds nothing to reopen. A window opened by a link
+     * passes false, to go where the link says instead.
+     */
+    fun reopenPlayer(open: Boolean = true) {
+        val p = lastPlayer ?: return
+        lastPlayer = null
+        if (!open) return
+        val w = history.get(p.seriesID)
+        val start = if (w != null && w.episode == p.episode && !w.finished) maxOf(0.0, w.position - 3) else 0.0
+        player.play(p.seriesID, p.episode, start, paused = !p.playing)
     }
 
     /** The feed of key, made with make the first time. */

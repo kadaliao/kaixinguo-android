@@ -52,9 +52,10 @@ flowchart LR
 | `model/Seasons.kt` | 季的编号和排序 | `Seasons.swift` |
 | `model/Card.kt` | 卡片和各种文案（集数、热度、日期） | `Card.swift` |
 | `model/Store.kt` | JSON 文件存储、观看记录、收藏 | `Store.swift` |
+| `model/Session.kt` | 离开应用时在哪：标签页、页面栈、搜索、榜单和日期、倍速和清晰度、播放页上的那一集 | 无 |
 | `model/Catalog.kt` | 对 SDK 的抽象（测试里换成假的）、错误文案 | `Catalog.swift` |
 | `covers/CoverStore.kt` | 封面：下载、缩小、磁盘缓存、内存缓存 | `CoverStore.swift` |
-| `MainActivity.kt` | 窗口、`kaixinguo://` 链接、画中画、离开时暂停 | `KaixinguoApp.swift` |
+| `MainActivity.kt` | 窗口、`kaixinguo://` 链接、画中画、离开时暂停、回来时接着放 | `KaixinguoApp.swift` |
 | `ui/App.kt`、`ui/Router.kt` | 标签页（手机底栏、平板侧栏）、每个标签的页面栈 | `RootView.swift`、`Router.swift` |
 | `ui/Grid.kt` | 海报网格、卡片、封面、空状态、胶囊、搜索框 | `Grid.swift` |
 | `ui/CatalogScreens.kt` | 推荐、排行榜、新剧上线、搜索、热搜、我的 | `CatalogViews.swift` |
@@ -96,7 +97,17 @@ flowchart LR
 
 - **`PlaybackService`** 是 Media3 的 `MediaSessionService`，包着同一个 ExoPlayer。`MainActivity` 在前台时连着它，开始播放后它把自己升为前台服务，熄屏、锁屏也能接着放，通知栏和锁屏显示剧名、集数和封面。ExoPlayer 一次只放一集，所以会话里的「上一集 / 下一集」按钮用 `ForwardingPlayer` 接到 `Player.step`。
 - **画中画**：正在放的时候离开应用，窗口缩成小窗（Android 12 起由系统自动进入，之前在 `onUserLeaveHint` 里手动进入）。小窗里只显示视频：`PlayerScreen` 收到 `inPip` 后隐藏所有控件，`VideoSurface` 留在原处，画面不中断。点小窗回到播放页；关掉小窗时活动已经停了，`onPictureInPictureModeChanged` 据此判断并退出播放。
-- **离开时暂停**：没进画中画就离开应用（比如用户关掉了画中画权限），`onStop` 会暂停；但只是熄屏的话不暂停，所以可以锁屏听。
+- **离开时暂停**：没进画中画就离开应用（比如用户关掉了画中画权限），`onStop` 调 `Player.leaveApp` 暂停，记下看到哪里、离开时是不是在放；回来时 `onStart` 调 `returnToApp`，离开时在放就接着放，本来暂停的仍然暂停。离开期间从通知栏点了播放或暂停，以那一下为准。只是熄屏的话不暂停，所以可以锁屏听。
+
+### 回到离开时的样子
+
+应用被系统回收、被用户从最近任务里划掉，或者被强行停止，再打开时回到离开时的样子：
+
+- **存什么**：`Session` 记着标签页、每个标签的页面栈、搜索框和搜索词、选中的榜单和日期、倍速和清晰度，以及播放页上的那一集和它当时是不是在放。看到第几秒不在这里，用观看记录里的。
+- **什么时候存**：`KaixinguoApplication` 用 `snapshotFlow` 盯着这些状态，一变就存到 `files/session.json`（写盘和观看记录一样在后台线程）；`onStop` 再存一次并等它落盘。这样在后台连播到下一集、关掉画中画这类离开以后的变化也能记下。
+- **怎么恢复**：`AppModel` 启动时读回自己那部分（榜单、日期、倍速、清晰度），`Router.restore` 读回标签页和页面栈。播放页要等窗口打开：本次启动的第一个窗口调 `reopenPlayer`，从观看记录里那一秒往前 3 秒打开那一集，离开时在放就接着放，暂停的就停在那一帧。进程可能先被媒体服务拉起来、过一会儿才开窗口，所以还没重新打开的那一集照样写回文件。
+- **链接优先**：用 `kaixinguo://` 链接打开时去链接说的地方，不再打开上次的播放页。
+- 选中的新剧日期只在同一天有效，隔天打开回到「今天」。
 
 ### 华为和其他国产系统
 
@@ -127,6 +138,7 @@ flowchart LR
 | --- | --- | --- |
 | `files/history.json` | 观看记录，最近的在前，最多 200 部；每部记着看到哪里和看完了哪几集 | `History` |
 | `files/favorites.json` | 收藏，最近收藏的在前 | `Favorites` |
+| `files/session.json` | 离开应用时在哪，下次打开回到那里；只有 Android 版有 | `AppModel`、`Router` |
 | `no_backup/openhongguo/anonymous.json` | SDK 注册的匿名设备，不参与备份 | openhongguo |
 | `cache/home.json` | 推荐页第一页 | `AppModel` |
 | `cache/covers/` | 封面 JPEG | `CoverStore` |
@@ -146,7 +158,7 @@ flowchart LR
 ./gradlew testDebugUnitTest
 ```
 
-- **逻辑测试**（`model/CatalogTest.kt`）用 `FakeCatalog` 和 `FakeVideo` 代替 SDK 和 ExoPlayer，不联网，用协程测试的虚拟时间跑重试和定时关闭：分页和去重、缓存合并、自动重试、搜索回退和补封面、选季和续播、播放状态、长按倍速、定时关闭、观看记录和收藏的读写（包括 Go 写的文件）。
+- **逻辑测试**（`model/CatalogTest.kt`、`model/SessionTest.kt`）用 `FakeCatalog` 和 `FakeVideo` 代替 SDK 和 ExoPlayer，不联网，用协程测试的虚拟时间跑重试和定时关闭：分页和去重、缓存合并、自动重试、搜索回退和补封面、选季和续播、播放状态、长按倍速、定时关闭、观看记录和收藏的读写（包括 Go 写的文件）、离开再回来和重新启动后回到原处。
 - **解密测试**（`cenc/CencTest.kt`）在测试里从零拼出加密的 MP4（用 JDK 自己的 CTR 模式加密，不拿解密器验证自己），覆盖 senc、子样本、saiz/saio、moov 在文件末尾等情况，整段和任意切片解密结果必须一致。
 
 拿一集真实的加密剧集和 Go 版的输出逐字节比较：

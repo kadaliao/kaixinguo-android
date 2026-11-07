@@ -4,6 +4,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.kadaliao.kaixinguo.model.Session
 
 /** Tab is one of the app's tabs. */
 enum class Tab(val label: String) {
@@ -17,6 +18,23 @@ enum class Tab(val label: String) {
 /** Route is a page a tab's stack can push. */
 sealed interface Route {
     data class Series(val id: String) : Route
+
+    /** The route as a session saves it. */
+    val saved: String
+        get() = when (this) {
+            is Series -> "series:$id"
+        }
+
+    companion object {
+        /** The route a session saved; null for one this version doesn't know. */
+        fun parse(s: String): Route? {
+            val (kind, arg) = s.split(':', limit = 2).takeIf { it.size == 2 } ?: return null
+            return when (kind) {
+                "series" -> if (arg.isNotEmpty()) Series(arg) else null
+                else -> null
+            }
+        }
+    }
 }
 
 /** Router is where the viewer is: the tab, and the pages pushed in each. It belongs to the main thread. */
@@ -83,6 +101,26 @@ class Router {
         } else if (tab != Tab.DISCOVER) {
             tab = Tab.DISCOVER
         }
+    }
+
+    /** The session s, with the tab, the pages in each and the search, for the next launch to open there. */
+    fun saveTo(s: Session): Session = s.copy(
+        tab = tab.name,
+        paths = paths.filterValues { it.isNotEmpty() }.entries.associate { (t, p) -> t.name to p.map { it.saved } },
+        searchText = searchText,
+        searchQuery = searchQuery,
+    )
+
+    /** Goes back to the tab, pages and search the session saved, skipping what this version doesn't know. */
+    fun restore(s: Session) {
+        tab = Tab.entries.firstOrNull { it.name == s.tab } ?: Tab.DISCOVER
+        for (t in Tab.entries) {
+            val p = paths.getValue(t)
+            p.clear()
+            s.paths[t.name]?.mapNotNullTo(p, Route::parse)
+        }
+        searchText = s.searchText
+        searchQuery = s.searchQuery
     }
 
     private fun pop(t: Tab) {

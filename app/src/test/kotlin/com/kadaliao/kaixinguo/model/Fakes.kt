@@ -10,6 +10,8 @@ import dev.openhongguo.NewReleasePage
 import dev.openhongguo.NewReleaseQuery
 import dev.openhongguo.OpenhongguoException
 import dev.openhongguo.Page
+import dev.openhongguo.PlatformType
+import dev.openhongguo.Playback
 import dev.openhongguo.PlaybackResult
 import dev.openhongguo.SearchOptions
 import dev.openhongguo.Series
@@ -17,6 +19,7 @@ import dev.openhongguo.SeriesDetail
 import dev.openhongguo.SeriesSummary
 import dev.openhongguo.ShortRankQuery
 import dev.openhongguo.ShortRanking
+import dev.openhongguo.Stream
 import dev.openhongguo.Suggestion
 import kotlinx.coroutines.CoroutineScope
 import java.io.File
@@ -61,9 +64,12 @@ class FakeCatalog : Catalog {
 
     override suspend fun shortRank(query: ShortRankQuery) = ShortRanking()
 
+    /** The episodes the server gives, by ID; the others it won't give anonymously. */
+    val playbacks = HashMap<String, PlaybackResult>()
+
     override suspend fun resolvePlayback(episodeId: String): PlaybackResult {
         calls += "resolve:$episodeId"
-        throw OpenhongguoException(ErrorCode.ANONYMOUS_LIMITED, "limited")
+        return playbacks[episodeId] ?: throw OpenhongguoException(ErrorCode.ANONYMOUS_LIMITED, "limited")
     }
 }
 
@@ -102,14 +108,32 @@ class FakeVideo : Video {
     override fun seek(seconds: Double) {
         position = seconds
     }
+
+    /** Says what the video is doing, as ExoPlayer does a moment after it is told. */
+    fun reports(s: TimeControl) {
+        status = s
+        listener?.statusChanged()
+    }
 }
 
 fun tempDir(): File = Files.createTempDirectory("kxg").toFile()
 
-/** A model on a fake catalog and video, its files in a fresh directory. */
-fun testModel(scope: CoroutineScope, catalog: FakeCatalog = FakeCatalog(), video: FakeVideo = FakeVideo(), cache: File? = null): AppModel {
-    val dir = tempDir()
-    return AppModel(catalog, File(dir, "data"), cache ?: File(dir, "cache"), scope, video) { _, _ -> "kaixinguo-stream://episode/test.mp4" }
+/** A model on a fake catalog and video, its files in a fresh directory, or in dir to read what a model before left. */
+fun testModel(
+    scope: CoroutineScope,
+    catalog: FakeCatalog = FakeCatalog(),
+    video: FakeVideo = FakeVideo(),
+    cache: File? = null,
+    dir: File = tempDir(),
+): AppModel = AppModel(catalog, File(dir, "data"), cache ?: File(dir, "cache"), scope, video) { _, _ -> "kaixinguo-stream://episode/test.mp4" }
+
+/** A series of n episodes in the catalog, each of which the server gives. */
+fun FakeCatalog.playable(id: String, n: Int) {
+    series[id] = Series(id = id, title = "剧$id", episodeCount = n, platform = PlatformType.OUTER)
+    episodes[id] = episodes(id, n)
+    for (e in episodes.getValue(id)) {
+        playbacks[e.id] = PlaybackResult(playback = Playback(episodeId = e.id, streams = listOf(Stream(definition = "720p", url = "https://cdn/${e.id}.mp4"))))
+    }
 }
 
 fun episodes(seriesID: String, n: Int, locked: Set<Int> = emptySet()): List<Episode> =

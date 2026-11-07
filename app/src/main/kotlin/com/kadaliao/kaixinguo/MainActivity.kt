@@ -35,7 +35,8 @@ import kotlinx.coroutines.launch
 /**
  * MainActivity is the app's one window. It opens `kaixinguo://` links,
  * goes into picture in picture when the viewer leaves a playing episode,
- * and pauses the episode when they leave it any other way.
+ * and pauses the episode when they leave it any other way, to play it on
+ * when they come back.
  */
 class MainActivity : ComponentActivity() {
     private val app get() = application as KaixinguoApplication
@@ -53,7 +54,11 @@ class MainActivity : ComponentActivity() {
             }
         }
         if (model == null) return
-        if (savedInstanceState == null) intent?.data?.let { open(it, model) }
+        // The launch's first window reopens the player where the viewer
+        // left it, unless a link says where to go.
+        val link = if (savedInstanceState == null) intent?.data?.takeIf { it.scheme == "kaixinguo" } else null
+        model.reopenPlayer(open = link == null)
+        link?.let { open(it, model) }
         // Picture in picture follows the episode: on while it plays.
         lifecycleScope.launch {
             snapshotFlow {
@@ -79,6 +84,8 @@ class MainActivity : ComponentActivity() {
         // episode playing with the screen off.
         val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
         controller = MediaController.Builder(this, token).buildAsync()
+        // Coming back plays on the episode that played as the viewer left.
+        app.model?.player?.returnToApp()
     }
 
     override fun onStop() {
@@ -86,11 +93,12 @@ class MainActivity : ComponentActivity() {
         controller?.let { MediaController.releaseFuture(it) }
         controller = null
         val model = app.model ?: return
-        model.flush() // what was saved last reaches the disk
         // Leaving the app pauses the episode, unless picture in picture
         // shows it, or the screen merely went off.
         val interactive = getSystemService(PowerManager::class.java)?.isInteractive ?: true
-        if (!isInPictureInPictureMode && interactive && model.player.isPresented) app.video.pause()
+        if (!isInPictureInPictureMode && interactive) model.player.leaveApp()
+        app.saveSession()
+        model.flush() // what was saved last reaches the disk
     }
 
     override fun onUserLeaveHint() {

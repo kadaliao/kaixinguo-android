@@ -16,53 +16,51 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * JSONStore keeps a list of values in a JSON file. The list itself belongs
- * to its owner on the main thread; the store only writes snapshots of it,
- * on a thread of its own, so saving never holds up a frame.
+ * JSONFile keeps a value in a JSON file. The value itself belongs to its
+ * owner on the main thread; the file only gets snapshots of it, written on
+ * a thread of its own, so saving never holds up a frame.
  */
-class JSONStore<T>(
+class JSONFile<T : Any>(
     val file: File,
-    private val encode: (T) -> JSONObject,
-    private val decode: (JSONObject) -> T?,
+    private val encode: (T) -> String,
+    private val decode: (String) -> T,
 ) {
     private val writer = Executors.newSingleThreadExecutor { r -> Thread(r, "kaixinguo-store").apply { isDaemon = true } }
-    private val pending = AtomicReference<List<T>?>(null)
+    private val pending = AtomicReference<T?>(null)
 
     /**
-     * Reads the list. A file that is missing or unreadable reads as an
-     * empty list: the app opens clean rather than refusing to open.
+     * Reads the value; null when the file is missing or unreadable, so the
+     * app opens clean rather than refusing to open.
      */
-    fun load(): List<T> = try {
-        val a = JSONArray(file.readText())
-        (0 until a.length()).mapNotNull { i -> a.optJSONObject(i)?.let(decode) }
+    fun load(): T? = try {
+        decode(file.readText())
     } catch (e: Exception) {
-        emptyList()
+        null
     }
 
-    /** Saves the list. A snapshot still waiting to be written is dropped: only the latest matters. */
-    fun save(list: List<T>) {
-        if (pending.getAndSet(list) != null) return // the write on its way takes this one
+    /** Saves the value. A snapshot still waiting to be written is dropped: only the latest matters. */
+    fun save(x: T) {
+        if (pending.getAndSet(x) != null) return // the write on its way takes this one
         writer.execute {
             val latest = pending.getAndSet(null) ?: return@execute
             write(latest)
         }
     }
 
-    /** Waits until every list saved so far is on disk, as the app goes to the background. */
+    /** Waits until every value saved so far is on disk, as the app goes to the background. */
     fun flush() {
         writer.submit {}.get()
     }
 
-    private fun write(list: List<T>) {
+    private fun write(x: T) {
         try {
-            val a = JSONArray()
-            for (x in list) a.put(encode(x))
+            val text = encode(x)
             file.parentFile?.mkdirs()
             // Written beside the file and moved over it, so a crash halfway
             // through cannot leave half a file behind.
             val tmp = File(file.parentFile, file.name + ".tmp")
             FileOutputStream(tmp).use { out ->
-                out.write(a.toString().toByteArray())
+                out.write(text.toByteArray())
                 out.fd.sync()
             }
             Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
@@ -70,6 +68,29 @@ class JSONStore<T>(
             debugLog { "store: ${file.name}: $e" }
         }
     }
+}
+
+/** JSONStore keeps a list of values in a JSON file, as [JSONFile] does; an entry it can't read is skipped. */
+class JSONStore<T>(
+    file: File,
+    encode: (T) -> JSONObject,
+    decode: (JSONObject) -> T?,
+) {
+    private val json = JSONFile<List<T>>(
+        file,
+        encode = { list -> JSONArray().apply { for (x in list) put(encode(x)) }.toString() },
+        decode = { text ->
+            val a = JSONArray(text)
+            (0 until a.length()).mapNotNull { i -> a.optJSONObject(i)?.let(decode) }
+        },
+    )
+
+    /** Reads the list; empty when the file is missing or unreadable. */
+    fun load(): List<T> = json.load() ?: emptyList()
+
+    fun save(list: List<T>) = json.save(list)
+
+    fun flush() = json.flush()
 }
 
 /** Go's zero time, which the macOS app writes for a time it never set. */
