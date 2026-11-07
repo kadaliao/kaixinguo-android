@@ -4,6 +4,8 @@
 
 ## [未发布]
 
+## [0.2.0] - 2026-11-07
+
 ### 新增
 
 - 退出后再打开，回到离开时的样子：原来的标签页和页面、搜索、选中的榜单；正在播放的剧从离开的地方接着放，暂停的仍然暂停
@@ -36,5 +38,6 @@
 - 投屏只能用系统的屏幕镜像
 - HarmonyOS NEXT（纯血鸿蒙）不能直接安装 APK
 
-[未发布]: https://github.com/kadaliao/kaixinguo-android/compare/v0.1.0...HEAD
+[未发布]: https://github.com/kadaliao/kaixinguo-android/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/kadaliao/kaixinguo-android/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/kadaliao/kaixinguo-android/releases/tag/v0.1.0
