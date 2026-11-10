@@ -30,6 +30,9 @@ interface VideoListener {
 
     /** The episode can't go on; `message` says why, in the viewer's words. */
     fun failed(message: String)
+
+    /** The episode's picture, as width over height, once the video knows it. */
+    fun aspectChanged(aspect: Float)
 }
 
 /** VideoItem is an episode as the video plays it, with what the lock screen shows. */
@@ -160,6 +163,10 @@ class Player internal constructor(
     var sleepAt by mutableStateOf<Instant?>(null)
         private set
 
+    /** Whether the episode's picture is wider than it is tall: from its stream at first, then from the video itself. */
+    var wide by mutableStateOf(false)
+        private set
+
     /** Whether the viewer has left the app, the episode paused until they come back. */
     var away by mutableStateOf(false)
         private set
@@ -185,6 +192,9 @@ class Player internal constructor(
             override fun statusChanged() = timeControlChanged()
             override fun ended() = this@Player.ended()
             override fun failed(message: String) = itemFailed(message)
+            override fun aspectChanged(aspect: Float) {
+                if (episodeID.isNotEmpty()) wide = aspect > 1f
+            }
         }
     }
 
@@ -199,6 +209,7 @@ class Player internal constructor(
      */
     fun play(seriesID: String, n: Int, start: Double = 0.0, paused: Boolean = false) {
         gen++
+        if (seriesID != this.seriesID) wide = false // another series may be shot the other way
         this.seriesID = seriesID
         number = n
         this.start = start
@@ -309,6 +320,7 @@ class Player internal constructor(
         debugLog { "play: ${ep.id} ${s.definition} ${s.codec} encrypted=${key != null}" }
         qualities = playable(pb.streams).map(::lines).toSortedSet().sortedDescending()
         quality = lines(s)
+        if (s.width > 0 && s.height > 0) wide = s.width > s.height
         val series = sp.series
         val cover = series?.coverUrl.orEmpty()
         return VideoItem(uri, ep.id, series?.title.orEmpty(), "第 ${ep.number} 集", app.artwork(cover), cover)

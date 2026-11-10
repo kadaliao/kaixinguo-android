@@ -4,6 +4,8 @@ import dev.openhongguo.Album
 import dev.openhongguo.ErrorCode
 import dev.openhongguo.OpenhongguoException
 import dev.openhongguo.Page
+import dev.openhongguo.Playback
+import dev.openhongguo.PlaybackResult
 import dev.openhongguo.PlatformType
 import dev.openhongguo.Season
 import dev.openhongguo.Series
@@ -409,6 +411,35 @@ class CatalogTest {
         runCurrent()
         assertEquals(PlayerState.Idle, model.player.state) // not failed: the resolve's answer went unheard
         assertFalse(video.hasItem)
+    }
+
+    /**
+     * Whether the picture is wider than tall comes from the stream at first,
+     * then from the video, which knows better; another series starts afresh.
+     */
+    @Test
+    fun widePicture() = runTest {
+        val catalog = FakeCatalog()
+        val video = FakeVideo()
+        val p = testModel(backgroundScope, catalog, video).player
+        catalog.playable("1", 2)
+        catalog.playable("2", 1)
+        catalog.playbacks["1e1"] = PlaybackResult(
+            playback = Playback(episodeId = "1e1", streams = listOf(Stream(definition = "720p", width = 1280, height = 720, url = "https://cdn/1e1.mp4"))),
+        )
+        p.play("1", 1)
+        runCurrent()
+        assertTrue(p.wide)
+        video.listener?.aspectChanged(9f / 16f)
+        assertFalse(p.wide)
+        video.listener?.aspectChanged(16f / 9f)
+        assertTrue(p.wide)
+
+        p.play("1", 2) // its stream doesn't say: the series is as it was
+        runCurrent()
+        assertTrue(p.wide)
+        p.play("2", 1)
+        assertFalse(p.wide)
     }
 
     /** Pulling the recommendations down puts the fresh ones first and goes on from where the grid had got to. */

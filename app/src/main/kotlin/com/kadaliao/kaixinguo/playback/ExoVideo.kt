@@ -61,6 +61,7 @@ class ExoVideo(context: Context, registry: StreamRegistry, http: DataSource.Fact
             override fun onVideoSizeChanged(videoSize: VideoSize) {
                 if (videoSize.width > 0 && videoSize.height > 0) {
                     aspect = videoSize.width * videoSize.pixelWidthHeightRatio / videoSize.height
+                    listener?.aspectChanged(aspect)
                 }
             }
 

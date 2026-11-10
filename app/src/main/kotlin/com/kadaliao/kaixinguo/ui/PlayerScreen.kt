@@ -2,7 +2,11 @@
 
 package com.kadaliao.kaixinguo.ui
 
+import android.app.Activity
+import android.content.pm.ActivityInfo
 import android.content.res.Configuration
+import android.provider.Settings
+import android.view.OrientationEventListener
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.compose.animation.AnimatedVisibility
@@ -70,6 +74,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -174,6 +179,7 @@ fun PlayerScreen(inPip: Boolean) {
     var searching by remember { mutableStateOf(false) }
     var resumeAfterSearch by remember { mutableStateOf(false) }
     val hud = remember { PlayerHud() }
+    val rotation = rememberRotation()
 
     // Pauses the episode for a search, to go on with it after.
     fun openSearch() {
@@ -205,7 +211,7 @@ fun PlayerScreen(inPip: Boolean) {
             // surface, as the device turns or picture in picture starts.
             Row(Modifier.fillMaxSize()) {
                 Column(Modifier.weight(1f).fillMaxHeight()) {
-                    VideoArea(hud, edge = landscape || panel, chrome = !inPip, search = ::openSearch, modifier = Modifier.weight(1f).fillMaxWidth())
+                    VideoArea(hud, edge = landscape || panel, chrome = !inPip, rotation = rotation, landscape = landscape, search = ::openSearch, modifier = Modifier.weight(1f).fillMaxWidth())
                     if (!inPip && !landscape && !panel) EpisodeBar { showEpisodes = true }
                 }
                 if (!inPip && panel) {
@@ -274,6 +280,66 @@ private fun PlayerWindow(hideBars: Boolean, keepOn: Boolean) {
 }
 
 /**
+ * The player screen's [Rotation], which hears the phone turn while a press
+ * holds the screen, and lets go as the player closes.
+ */
+@Composable
+private fun rememberRotation(): Rotation? {
+    val activity = LocalActivity.current ?: return null
+    val rotation = remember(activity) { Rotation(activity) }
+    val holding = rotation.held != null
+    DisposableEffect(rotation, holding) {
+        val listener = object : OrientationEventListener(activity) {
+            override fun onOrientationChanged(degrees: Int) = rotation.phoneTurned(degrees)
+        }
+        if (holding) listener.enable()
+        onDispose { listener.disable() }
+    }
+    DisposableEffect(rotation) { onDispose { rotation.release() } }
+    return rotation
+}
+
+/**
+ * Rotation turns the screen at a press: on its side, and upright again.
+ * The way pressed holds until the phone is turned that way too, when the
+ * screen goes back to following the phone, if auto-rotate is on; and as
+ * the player closes.
+ */
+private class Rotation(private val activity: Activity) {
+    /** The way a press turned the screen, while it holds: true on its side, false upright. */
+    var held by mutableStateOf<Boolean?>(null)
+        private set
+
+    fun turn(landscape: Boolean) {
+        held = landscape
+        activity.requestedOrientation =
+            if (landscape) ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+    }
+
+    /** Lets the screen follow the phone again, and the auto-rotate setting. */
+    fun release() {
+        if (held == null) return
+        held = null
+        activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+    }
+
+    /**
+     * Hears the phone turn, in degrees from upright. With auto-rotate off
+     * the screen wouldn't follow the phone, so the press holds.
+     */
+    fun phoneTurned(degrees: Int) {
+        val held = held ?: return
+        if (degrees == OrientationEventListener.ORIENTATION_UNKNOWN) return // lying flat
+        val side = degrees in 60..120 || degrees in 240..300
+        val upright = degrees <= 30 || degrees >= 330
+        if ((if (held) side else upright) && autoRotate()) release()
+    }
+
+    private fun autoRotate() =
+        Settings.System.getInt(activity.contentResolver, Settings.System.ACCELEROMETER_ROTATION, 0) == 1
+}
+
+/**
  * PlayerHud is what the fingers on the video are doing, for what shows over
  * it: a press and hold as it goes, the video following a swipe, and a word
  * on what the last one did.
@@ -307,7 +373,7 @@ private val shadowed = TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.4f),
  * goes down to the bottom of the screen too, with no episode bar below.
  */
 @Composable
-private fun VideoArea(hud: PlayerHud, edge: Boolean, chrome: Boolean, search: () -> Unit, modifier: Modifier) {
+private fun VideoArea(hud: PlayerHud, edge: Boolean, chrome: Boolean, rotation: Rotation?, landscape: Boolean, search: () -> Unit, modifier: Modifier) {
     Box(modifier.clipToBounds()) {
         VideoSurface(Modifier.fillMaxSize().offset { IntOffset(0, hud.offset.roundToInt()) })
         if (!chrome) return@Box
@@ -315,7 +381,7 @@ private fun VideoArea(hud: PlayerHud, edge: Boolean, chrome: Boolean, search: ()
         PauseMark(Modifier.align(Alignment.Center))
         PlayerOverlay()
         Column(Modifier.fillMaxSize()) {
-            TopBar(search)
+            TopBar(rotation, landscape, search)
             SpeedHint(hud)
             Spacer(Modifier.weight(1f))
             // With nothing under the video, the bar keeps clear of the system's.
@@ -515,9 +581,9 @@ private fun PlayerOverlay() {
 
 // MARK: - Over the video
 
-/** TopBar is what plays, and how fast, over the top of the video, with the way out, to search and to more. */
+/** TopBar is what plays, and how fast, over the top of the video, with the way out, to turn the screen, to search and to more. */
 @Composable
-private fun TopBar(search: () -> Unit) {
+private fun TopBar(rotation: Rotation?, landscape: Boolean, search: () -> Unit) {
     val player = LocalModel.current.player
     Box(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.5f), Color.Transparent)))) {
         Row(
@@ -536,9 +602,25 @@ private fun TopBar(search: () -> Unit) {
                 }
             }
             SpeedMenu()
+            if (rotation != null) RotateButton(rotation, landscape)
             IconButton(onClick = search) { Icon(Icons.Filled.Search, contentDescription = "搜索", tint = Color.White) }
             MoreMenu()
         }
+    }
+}
+
+/**
+ * RotateButton turns the screen on its side for a video wider than tall,
+ * and upright again: on phones, where on its side the screen shows the
+ * video alone. It stays while the screen is held on its side, so there is
+ * always a way back, even to a series shot upright.
+ */
+@Composable
+private fun RotateButton(rotation: Rotation, landscape: Boolean) {
+    val player = LocalModel.current.player
+    if (LocalConfiguration.current.smallestScreenWidthDp >= 600 || !(player.wide || rotation.held == true)) return
+    IconButton(onClick = { rotation.turn(landscape = !landscape) }) {
+        Icon(Icons.Filled.ScreenRotation, contentDescription = if (landscape) "竖屏观看" else "横屏观看", tint = Color.White)
     }
 }
 
