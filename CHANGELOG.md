@@ -4,6 +4,8 @@
 
 ## [未发布]
 
+## [0.3.1] - 2026-11-11
+
 ### 修复
 
 - 红果服务端在 11 月 10 日前后收紧了播放接口的校验，导致所有剧集都打不开（提示「这一集暂时无法匿名播放」）。更新匿名播放请求的签名后已恢复
@@ -48,7 +50,8 @@
 - 投屏只能用系统的屏幕镜像
 - HarmonyOS NEXT（纯血鸿蒙）不能直接安装 APK
 
-[未发布]: https://github.com/kadaliao/kaixinguo-android/compare/v0.3.0...HEAD
+[未发布]: https://github.com/kadaliao/kaixinguo-android/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/kadaliao/kaixinguo-android/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/kadaliao/kaixinguo-android/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/kadaliao/kaixinguo-android/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/kadaliao/kaixinguo-android/releases/tag/v0.1.0
