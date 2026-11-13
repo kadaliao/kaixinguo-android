@@ -1,6 +1,8 @@
 package com.kadaliao.kaixinguo.model
 
 import dev.openhongguo.Album
+import dev.openhongguo.DanmakuOptions
+import dev.openhongguo.DanmakuPage
 import dev.openhongguo.DiscoverOptions
 import dev.openhongguo.Episode
 import dev.openhongguo.EpisodeOptions
@@ -70,6 +72,15 @@ class FakeCatalog : Catalog {
     override suspend fun resolvePlayback(episodeId: String): PlaybackResult {
         calls += "resolve:$episodeId"
         return playbacks[episodeId] ?: throw OpenhongguoException(ErrorCode.ANONYMOUS_LIMITED, "limited")
+    }
+
+    /** The comments on each episode, by ID: a page for each cursor, "" the first. An episode not here has none; a cursor not here fails. */
+    val danmaku = HashMap<String, Map<String, DanmakuPage>>()
+
+    override suspend fun listDanmaku(seriesId: String, episodeId: String, options: DanmakuOptions): DanmakuPage {
+        calls += "danmaku:$episodeId:${options.cursor.orEmpty()}"
+        val pages = danmaku[episodeId] ?: return DanmakuPage()
+        return pages[options.cursor.orEmpty()] ?: throw OpenhongguoException(ErrorCode.TRANSPORT, "lost")
     }
 }
 

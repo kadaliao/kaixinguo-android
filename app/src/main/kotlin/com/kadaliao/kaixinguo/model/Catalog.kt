@@ -1,6 +1,8 @@
 package com.kadaliao.kaixinguo.model
 
 import dev.openhongguo.Album
+import dev.openhongguo.DanmakuOptions
+import dev.openhongguo.DanmakuPage
 import dev.openhongguo.DiscoverOptions
 import dev.openhongguo.Episode
 import dev.openhongguo.EpisodeOptions
@@ -38,6 +40,7 @@ interface Catalog {
     suspend fun seasons(seriesId: String): Album
     suspend fun shortRank(query: ShortRankQuery): ShortRanking
     suspend fun resolvePlayback(episodeId: String): PlaybackResult
+    suspend fun listDanmaku(seriesId: String, episodeId: String, options: DanmakuOptions): DanmakuPage
 }
 
 /** SdkCatalog is the catalog of the openhongguo client. */
@@ -53,6 +56,8 @@ class SdkCatalog(private val client: OpenhongguoClient) : Catalog {
     override suspend fun seasons(seriesId: String) = client.seasons(seriesId)
     override suspend fun shortRank(query: ShortRankQuery) = client.shortRank(query)
     override suspend fun resolvePlayback(episodeId: String) = client.resolvePlayback(episodeId)
+    override suspend fun listDanmaku(seriesId: String, episodeId: String, options: DanmakuOptions) =
+        client.listDanmaku(seriesId, episodeId, options)
 }
 
 /** Says what went wrong in the viewer's words. */

@@ -80,6 +80,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.Button
@@ -93,6 +94,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -102,15 +104,18 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
@@ -119,6 +124,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.key.Key
@@ -134,12 +141,16 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -149,6 +160,7 @@ import androidx.media3.ui.PlayerView
 import com.kadaliao.kaixinguo.model.Card
 import com.kadaliao.kaixinguo.model.DoubleSpeed
 import com.kadaliao.kaixinguo.model.Fav
+import com.kadaliao.kaixinguo.model.Lanes
 import com.kadaliao.kaixinguo.model.Player
 import com.kadaliao.kaixinguo.model.PlayerState
 import com.kadaliao.kaixinguo.model.Sleep
@@ -377,6 +389,12 @@ private fun VideoArea(hud: PlayerHud, edge: Boolean, chrome: Boolean, rotation: 
     Box(modifier.clipToBounds()) {
         VideoSurface(Modifier.fillMaxSize().offset { IntOffset(0, hud.offset.roundToInt()) })
         if (!chrome) return@Box
+        // Under the controls and below the top bar's row; it goes with the video as a swipe moves it.
+        DanmakuLayer(
+            Modifier.fillMaxSize().offset { IntOffset(0, hud.offset.roundToInt()) }
+                .windowInsetsPadding(WindowInsets.statusBars.union(WindowInsets.displayCutout).only(WindowInsetsSides.Top))
+                .padding(top = 52.dp),
+        )
         Gestures(hud, Modifier.fillMaxSize())
         PauseMark(Modifier.align(Alignment.Center))
         PlayerOverlay()
@@ -542,6 +560,53 @@ private suspend fun AwaitPointerEventScope.swipe(down: PointerInputChange, playe
     }
 }
 
+private val danmakuStyle = TextStyle(color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+
+/**
+ * DanmakuLayer flies the episode's comments right to left across the top
+ * of the video, white with a dark edge, as [Lanes] places them. Where they
+ * are follows the video's time: read every frame while it plays, and now
+ * and then otherwise, which a drag along the progress bar may move. Nothing
+ * here takes a touch, so the video's gestures work through it.
+ */
+@Composable
+private fun DanmakuLayer(modifier: Modifier) {
+    val player = LocalModel.current.player
+    val comments = player.danmaku
+    if (comments.isEmpty() || !(player.state == PlayerState.Playing || player.state == PlayerState.Buffering)) return
+    val video = player.video
+    val moving = player.state == PlayerState.Playing && !player.paused
+    var now by remember { mutableLongStateOf(-1L) } // ms into the episode; -1 without one
+    LaunchedEffect(moving) {
+        while (true) {
+            val t = video.position
+            now = if (t.isFinite()) (t * 1000).toLong() else -1L
+            if (moving) withFrameMillis {} else delay(250)
+        }
+    }
+    val measurer = rememberTextMeasurer()
+    Spacer(
+        modifier.drawWithCache {
+            val em = danmakuStyle.fontSize.toPx()
+            val lane = em * 1.6f
+            val lanes = Lanes(comments, size.width / em)
+            val texts = arrayOfNulls<TextLayoutResult>(lanes.flights.size) // each measured as it first shows
+            val edge = Stroke(width = 2.dp.toPx(), join = StrokeJoin.Round)
+            onDrawBehind {
+                val ms = now
+                if (ms < 0) return@onDrawBehind
+                lanes.at(ms) { i, x ->
+                    val f = lanes.flights[i]
+                    val text = texts[i] ?: measurer.measure(f.comment.text, danmakuStyle, softWrap = false, maxLines = 1).also { texts[i] = it }
+                    val at = Offset(x * em, f.lane * lane + (lane - text.size.height) / 2)
+                    drawText(text, Color.Black.copy(alpha = 0.7f), at, drawStyle = edge)
+                    drawText(text, topLeft = at)
+                }
+            }
+        },
+    )
+}
+
 /** PauseMark says the video is paused; a tap anywhere on it plays on. */
 @Composable
 private fun PauseMark(modifier: Modifier) {
@@ -672,8 +737,9 @@ private fun Choice(label: String, on: Boolean, pick: () -> Unit) {
 private enum class More { MAIN, SPEED, QUALITY, SLEEP }
 
 /**
- * MoreMenu sets how the episode plays: its speed, its definition and when
- * to stop; and saves the series, or opens its page.
+ * MoreMenu sets how the episode plays: its speed, its definition, when to
+ * stop and whether comments fly over it; and saves the series, or opens its
+ * page.
  */
 @Composable
 private fun MoreMenu() {
@@ -695,6 +761,12 @@ private fun MoreMenu() {
                         Entry("清晰度", Icons.Filled.HighQuality, "${player.quality}P") { page = More.QUALITY }
                     }
                     Entry("定时关闭", Icons.Filled.Bedtime, sleepLine(player)) { page = More.SLEEP }
+                    DropdownMenuItem(
+                        text = { Text("弹幕") },
+                        leadingIcon = { Icon(Icons.Filled.Subtitles, contentDescription = null) },
+                        trailingIcon = { Switch(checked = player.showDanmaku, onCheckedChange = null) },
+                        onClick = { player.chooseDanmaku(!player.showDanmaku) },
+                    )
                     val sp = player.page
                     val series = sp?.series
                     if (sp != null && series != null) {
