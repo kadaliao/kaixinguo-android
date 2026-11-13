@@ -42,6 +42,7 @@ class SessionTest {
         m.chooseDay(tomorrow)
         m.player.chooseSpeed(1.5f)
         m.player.chooseQuality(720)
+        m.player.chooseDanmaku(false)
 
         m.player.play("1", 2)
         runCurrent()
@@ -67,6 +68,7 @@ class SessionTest {
         assertEquals(1.5f, m2.player.speed)
         assertEquals(1.5f, video2.speed)
         assertEquals(720, m2.player.preferredQuality)
+        assertFalse(m2.player.showDanmaku)
         assertFalse(m2.player.isPresented) // until the window opens
 
         m2.reopenPlayer()
@@ -196,6 +198,7 @@ class SessionTest {
         )
         assertEquals(1f, s.speed)
         assertNull(s.quality)
+        assertTrue(s.danmaku) // on, as a file from before it was saved says nothing
         assertNull(s.player)
         val router = Router()
         router.restore(s)
@@ -215,7 +218,7 @@ class SessionTest {
         // A round trip keeps everything.
         val full = Session(
             tab = "MINE", paths = mapOf("MINE" to listOf("series:1")), searchText = "a", searchQuery = "b",
-            rankContent = "c", rankBoard = "d", newDate = "e", day = "f", speed = 1.25f, quality = 540,
+            rankContent = "c", rankBoard = "d", newDate = "e", day = "f", speed = 1.25f, quality = 540, danmaku = false,
             player = SessionPlayer("1", 4, playing = true),
         )
         assertEquals(full, Session.fromJson(JSONObject(full.toJson().toString())))

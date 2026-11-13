@@ -91,6 +91,7 @@ class AppModel(
         if (s.day == todayKey()) newDate = s.newDate
         player.chooseSpeed(s.speed)
         s.quality?.let(player::chooseQuality)
+        player.chooseDanmaku(s.danmaku)
     }
 
     /** Writes what is waiting to be saved, as the app leaves the screen. */
@@ -104,8 +105,8 @@ class AppModel(
 
     /**
      * The model's part of where the viewer is: the chart and day chosen, the
-     * speed and definition, and the episode the player shows. The router
-     * adds the tab and pages before it is saved.
+     * speed and definition, whether comments fly, and the episode the player
+     * shows. The router adds the tab and pages before it is saved.
      */
     fun session(): Session {
         val p = player
@@ -118,6 +119,7 @@ class AppModel(
             day = todayKey(),
             speed = p.speed,
             quality = p.preferredQuality,
+            danmaku = p.showDanmaku,
             player = showing ?: lastPlayer, // not reopened yet, it stays for the window to reopen
         )
     }

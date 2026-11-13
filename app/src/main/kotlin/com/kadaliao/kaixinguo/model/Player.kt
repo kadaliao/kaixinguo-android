@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import dev.openhongguo.DanmakuOptions
 import dev.openhongguo.Episode
 import dev.openhongguo.Playback
 import dev.openhongguo.PlaybackResult
@@ -173,6 +174,14 @@ class Player internal constructor(
     private var playOnReturn by mutableStateOf(false) // it played as they left
     private var startPaused by mutableStateOf(false) // the episode starting shows without playing
 
+    /** Whether comments fly over the video: on unless the viewer turned them off. */
+    var showDanmaku by mutableStateOf(true)
+        private set
+
+    /** The comments on the episode starting or playing, as many as have come, in the order they came. */
+    var danmaku by mutableStateOf(emptyList<Comment>())
+        private set
+
     private var start = 0.0 // where to start, in seconds
     private var gen = 0 // tells this start from later ones
     private var pending = false // waits for the series to load
@@ -180,6 +189,8 @@ class Player internal constructor(
     private val futures = HashMap<String, Future>()
     private var sleepJob: Job? = null
     private var ticker: Job? = null
+    private var danmakuFor = "" // the episode whose comments are here, or on their way
+    private var danmakuJob: Job? = null
 
     /** Future is an episode's playback model being resolved, shared by the start of the episode and the prefetch before it. */
     private class Future {
@@ -257,6 +268,7 @@ class Player internal constructor(
         state = PlayerState.Resolving
         sp.reveal(number)
         record(sp, number, start, 0.0, finished = false)
+        loadDanmaku(sp.id, ep.id)
         val gen = gen
         val start = start
         val paused = startPaused
@@ -491,6 +503,54 @@ class Player internal constructor(
                 chooseSpeed(baseRate)
             }
         }
+    }
+
+    // MARK: - Comments over the video
+
+    /** Shows the comments over the video, the episode's own, or hides them; the episodes after follow suit. */
+    fun chooseDanmaku(on: Boolean) {
+        showDanmaku = on
+        if (!on) {
+            dropDanmaku()
+            return
+        }
+        val sp = page ?: return
+        sp.episode(number)?.let { loadDanmaku(sp.id, it.id) }
+    }
+
+    /**
+     * Fetches the episode's comments unless they are here or on their way;
+     * another episode's go. They come a stretch of the episode at a time,
+     * and a stretch may have none with more to come after. A failure leaves
+     * those that came, and the episode's next start tries afresh.
+     */
+    private fun loadDanmaku(seriesID: String, episode: String) {
+        if (!showDanmaku || episode == danmakuFor) return
+        dropDanmaku()
+        danmakuFor = episode
+        danmakuJob = app.scope.launch {
+            val seen = HashSet<String>()
+            var cursor: String? = null
+            repeat(100) { // short of a server that never says it is done
+                val r = attempt { app.catalog.listDanmaku(seriesID, episode, DanmakuOptions(cursor = cursor)) }.getOrElse {
+                    debugLog { "danmaku: $episode: $it" }
+                    danmakuFor = ""
+                    return@launch
+                }
+                val got = r.items.filter { seen.add(it.id) }.mapNotNull(::comment)
+                if (got.isNotEmpty()) danmaku = danmaku + got
+                val next = r.cursor
+                if (!r.hasMore || next.isNullOrEmpty() || next == cursor) return@launch
+                cursor = next
+            }
+        }
+    }
+
+    private fun dropDanmaku() {
+        danmakuJob?.cancel()
+        danmakuJob = null
+        danmakuFor = ""
+        danmaku = emptyList()
     }
 
     // MARK: - What the video does

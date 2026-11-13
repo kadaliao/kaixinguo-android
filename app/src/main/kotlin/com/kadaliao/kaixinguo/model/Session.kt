@@ -7,9 +7,9 @@ import java.io.File
 /**
  * Session is where the viewer was as they last left the app: the tab, the
  * pages open in each, the search, the chart and day chosen, the speed and
- * definition picked, and the episode the player showed. The next launch
- * opens there. The model fills in its part, the app's router the tab and
- * pages; each reads back what it wrote.
+ * definition picked, whether comments flew over the video, and the episode
+ * the player showed. The next launch opens there. The model fills in its
+ * part, the app's router the tab and pages; each reads back what it wrote.
  */
 data class Session(
     /** The tab showing, by its name; empty for the first. */
@@ -25,6 +25,8 @@ data class Session(
     val day: String = "",
     val speed: Float = 1f,
     val quality: Int? = null,
+    /** Whether comments flew over the video; on until the viewer turns them off. */
+    val danmaku: Boolean = true,
     /** The episode the player showed; null when it didn't show. */
     val player: SessionPlayer? = null,
 ) {
@@ -38,6 +40,7 @@ data class Session(
         .put("new_date", newDate)
         .put("day", day)
         .put("speed", speed.toDouble())
+        .put("danmaku", danmaku)
         .apply {
             if (quality != null) put("quality", quality)
             if (player != null) put("player", player.toJson())
@@ -64,6 +67,7 @@ data class Session(
                 day = o.optString("day"),
                 speed = if (speed in 0.25f..4f) speed else 1f,
                 quality = o.optInt("quality", 0).takeIf { it > 0 },
+                danmaku = o.optBoolean("danmaku", true),
                 player = o.optJSONObject("player")?.let(SessionPlayer::fromJson),
             )
         }
