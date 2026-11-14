@@ -20,8 +20,8 @@ android {
         // Android 9: the first that decodes the CDN's HEIC covers.
         minSdk = 28
         targetSdk = 36
-        versionCode = 4
-        versionName = "0.3.1"
+        versionCode = 5
+        versionName = "0.4.0"
     }
 
     signingConfigs {
@@ -77,9 +77,7 @@ android {
 }
 
 dependencies {
-    // 临时用 fork 的 Release（见 settings.gradle.kts），那里只有 aar 文件、没有 pom，
-    // 所以要写明类型；它依赖的 kotlinx-coroutines-core 由下面的 coroutines-android 带进来。
-    implementation(libs.openhongguo) { artifact { type = "aar" } }
+    implementation(libs.openhongguo)
     implementation(libs.coroutines.android)
     implementation(libs.androidx.core)
     implementation(libs.androidx.activity.compose)
