@@ -4,6 +4,8 @@
 
 ## [未发布]
 
+## [0.4.0] - 2026-11-14
+
 ### 新增
 
 - 播放时显示弹幕：白字描边，从右往左飘过画面上方，跟着播放进度走，暂停时停住；「⋯」里可以关掉，下次打开还记得。画中画小窗里不显示
@@ -54,7 +56,8 @@
 - 投屏只能用系统的屏幕镜像
 - HarmonyOS NEXT（纯血鸿蒙）不能直接安装 APK
 
-[未发布]: https://github.com/kadaliao/kaixinguo-android/compare/v0.3.1...HEAD
+[未发布]: https://github.com/kadaliao/kaixinguo-android/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/kadaliao/kaixinguo-android/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/kadaliao/kaixinguo-android/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/kadaliao/kaixinguo-android/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/kadaliao/kaixinguo-android/compare/v0.1.0...v0.2.0
