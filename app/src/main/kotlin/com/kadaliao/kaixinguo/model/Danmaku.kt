@@ -23,6 +23,12 @@ private const val GAP = 2f
 /** How long a comment may wait for a lane, in ms, before it is dropped. */
 private const val MAX_WAIT_MS = 1500L
 
+/** How long a comment takes to fade in as it comes in at the right edge, in ms of the episode. */
+private const val FADE_IN_MS = 220f
+
+/** How long it takes to fade out as it leaves at the left edge, in ms of the episode. */
+private const val FADE_OUT_MS = 600f
+
 /**
  * About how wide the text is, in ems, erring wide: Chinese and the like an
  * em a letter, emoji a little more, and the rest, Latin and digits among
@@ -49,6 +55,14 @@ internal fun ems(text: String): Float {
  * edge and has gone past the left.
  */
 class Flight(val comment: Comment, val lane: Int, val width: Float, val enter: Long, val leave: Long)
+
+/**
+ * How much of the comment shows `ms` into the episode, 0 to 1: it fades in
+ * as it comes in at the right edge and out as it goes off the left, so
+ * comments turn up and leave softly, and none is a bright thing suddenly.
+ */
+internal fun Flight.alpha(ms: Long): Float =
+    minOf((ms - enter) / FADE_IN_MS, (leave - ms) / FADE_OUT_MS).coerceIn(0f, 1f)
 
 /**
  * Lanes is where an episode's comments fly over a screen `screen` ems wide,

@@ -164,6 +164,7 @@ import com.kadaliao.kaixinguo.model.Lanes
 import com.kadaliao.kaixinguo.model.Player
 import com.kadaliao.kaixinguo.model.PlayerState
 import com.kadaliao.kaixinguo.model.Sleep
+import com.kadaliao.kaixinguo.model.alpha
 import com.kadaliao.kaixinguo.model.favLabel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -560,14 +561,17 @@ private suspend fun AwaitPointerEventScope.swipe(down: PointerInputChange, playe
     }
 }
 
-private val danmakuStyle = TextStyle(color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+/** The comments' text: a modest size, light and well see-through, so they sit over the video without hiding it. */
+private val danmakuStyle = TextStyle(color = Color.White.copy(alpha = 0.6f), fontSize = 14.sp, fontWeight = FontWeight.Thin)
 
 /**
  * DanmakuLayer flies the episode's comments right to left across the top
- * of the video, white with a dark edge, as [Lanes] places them. Where they
- * are follows the video's time: read every frame while it plays, and now
- * and then otherwise, which a drag along the progress bar may move. Nothing
- * here takes a touch, so the video's gestures work through it.
+ * of the video, white with a soft dark edge, as [Lanes] places them; they
+ * fade in and out at the edges and none is drawn fully opaque, so they
+ * stay in the back of the eye. Where they are follows the video's time:
+ * read every frame while it plays, and now and then otherwise, which a drag
+ * along the progress bar may move. Nothing here takes a touch, so the
+ * video's gestures work through it.
  */
 @Composable
 private fun DanmakuLayer(modifier: Modifier) {
@@ -591,7 +595,9 @@ private fun DanmakuLayer(modifier: Modifier) {
             val lane = em * 1.6f
             val lanes = Lanes(comments, size.width / em)
             val texts = arrayOfNulls<TextLayoutResult>(lanes.flights.size) // each measured as it first shows
-            val edge = Stroke(width = 2.dp.toPx(), join = StrokeJoin.Round)
+            val edge = Stroke(width = 0.8.dp.toPx(), join = StrokeJoin.Round)
+            val edgeColor = Color.Black.copy(alpha = 0.18f)
+            val glow = Shadow(color = Color.Black.copy(alpha = 0.28f), blurRadius = 2f * density)
             onDrawBehind {
                 val ms = now
                 if (ms < 0) return@onDrawBehind
@@ -599,8 +605,9 @@ private fun DanmakuLayer(modifier: Modifier) {
                     val f = lanes.flights[i]
                     val text = texts[i] ?: measurer.measure(f.comment.text, danmakuStyle, softWrap = false, maxLines = 1).also { texts[i] = it }
                     val at = Offset(x * em, f.lane * lane + (lane - text.size.height) / 2)
-                    drawText(text, Color.Black.copy(alpha = 0.7f), at, drawStyle = edge)
-                    drawText(text, topLeft = at)
+                    val alpha = f.alpha(ms)
+                    drawText(text, edgeColor, at, alpha = alpha, drawStyle = edge)
+                    drawText(text, topLeft = at, alpha = alpha, shadow = glow)
                 }
             }
         },
