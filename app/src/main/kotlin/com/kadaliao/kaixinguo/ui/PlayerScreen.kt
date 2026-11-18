@@ -5,6 +5,7 @@ package com.kadaliao.kaixinguo.ui
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
+import android.media.AudioManager
 import android.provider.Settings
 import android.view.OrientationEventListener
 import androidx.activity.compose.BackHandler
@@ -115,6 +116,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -138,6 +140,7 @@ import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
@@ -177,7 +180,8 @@ import kotlin.math.roundToInt
  * PlayerScreen is the episode playing, its video filling the screen: what
  * plays and how fast above it, the episodes below it on phones and beside
  * it on tablets. Swiping up goes on to the next episode, and down back to
- * the one before. In picture in picture only the video shows.
+ * the one before; sideways sets the brightness on the left half and the
+ * volume on the right. In picture in picture only the video shows.
  */
 @Composable
 fun PlayerScreen(inPip: Boolean) {
@@ -192,6 +196,8 @@ fun PlayerScreen(inPip: Boolean) {
     var resumeAfterSearch by remember { mutableStateOf(false) }
     val hud = remember { PlayerHud() }
     val rotation = rememberRotation()
+    // The little window shows the video as it is, and the dimming doesn't come back with the screen.
+    LaunchedEffect(inPip) { if (inPip) hud.brightness = 1f }
 
     // Pauses the episode for a search, to go on with it after.
     fun openSearch() {
@@ -365,6 +371,13 @@ private class PlayerHud {
     /** How far the video has followed a swipe up or down, in pixels. */
     var offset by mutableFloatStateOf(0f)
 
+    /**
+     * How bright the video shows, from 0 to 1: below 1 a dark layer covers
+     * it, so the system's brightness, and its permission, are left alone.
+     * It lasts while the player is open, upright or on its side.
+     */
+    var brightness by mutableFloatStateOf(1f)
+
     /** What the last gesture did, or couldn't, said for a moment. */
     var toast by mutableStateOf<Toast?>(null)
 
@@ -389,6 +402,12 @@ private fun VideoArea(hud: PlayerHud, edge: Boolean, chrome: Boolean, rotation: 
     Box(modifier.clipToBounds()) {
         VideoSurface(Modifier.fillMaxSize().offset { IntOffset(0, hud.offset.roundToInt()) })
         if (!chrome) return@Box
+        // Over the video alone; read as it draws, so a slide doesn't recompose the controls.
+        Spacer(
+            Modifier.fillMaxSize().drawBehind {
+                if (hud.brightness < 1f) drawRect(Color.Black, alpha = (1f - hud.brightness) * MAX_DIM)
+            },
+        )
         // Under the controls and below the top bar's row; it goes with the video as a swipe moves it.
         DanmakuLayer(
             Modifier.fillMaxSize().offset { IntOffset(0, hud.offset.roundToInt()) }
@@ -440,13 +459,16 @@ private sealed interface Touch {
 }
 
 /**
- * Gestures reads the fingers on the video: a tap pauses, a swipe moves
- * between episodes, and a press and hold plays at double speed.
+ * Gestures reads the fingers on the video: a tap pauses, a swipe up or down
+ * moves between episodes, one sideways sets the brightness or the volume,
+ * and a press and hold plays at double speed.
  */
 @Composable
 private fun Gestures(hud: PlayerHud, modifier: Modifier) {
     val player = LocalModel.current.player
     val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
+    val audio = remember(context) { context.getSystemService(AudioManager::class.java) }
     val scope = rememberCoroutineScope()
     Box(
         modifier.pointerInput(Unit) {
@@ -469,7 +491,9 @@ private fun Gestures(hud: PlayerHud, modifier: Modifier) {
                     touch == null -> hold(down, player, hud, haptic)
                     touch == Touch.Up -> player.togglePause()
                     touch is Touch.Moved && abs(touch.by.y) > abs(touch.by.x) -> swipe(down, player, hud, scope)
-                    else -> untilUp(down) // sideways: nothing
+                    down.position.x < size.width / 2 -> brighten(down, hud)
+                    audio != null -> louden(down, hud, audio)
+                    else -> untilUp(down)
                 }
             }
         },
@@ -557,6 +581,54 @@ private suspend fun AwaitPointerEventScope.swipe(down: PointerInputChange, playe
         animate(hud.offset, if (dy < 0) -h else h, animationSpec = tween(200, easing = FastOutLinearInEasing)) { v, _ -> hud.offset = v }
         player.step(d)
         hud.offset = 0f // the screen black, until the next episode
+    }
+}
+
+/** How dark the layer over the video gets at brightness 0, so the picture never goes quite black. */
+private const val MAX_DIM = 0.8f
+
+/** How far a finger has slid sideways from where it went down, as a fraction of the width; null once it lifts. */
+private suspend fun AwaitPointerEventScope.slid(down: PointerInputChange): Float? {
+    val c = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: return null
+    if (!c.pressed) return null
+    c.consume()
+    return (c.position.x - down.position.x) / size.width
+}
+
+/**
+ * Sliding sideways on the left half dims the video, or brings it back: to
+ * the right is brighter, and a slide across the whole width goes from dark
+ * to full.
+ */
+private suspend fun AwaitPointerEventScope.brighten(down: PointerInputChange, hud: PlayerHud) {
+    val from = hud.brightness
+    while (true) {
+        val by = slid(down) ?: return
+        hud.brightness = (from + by).coerceIn(0f, 1f)
+        hud.say("亮度 ${(hud.brightness * 100).roundToInt()}%")
+    }
+}
+
+/**
+ * Sliding sideways on the right half sets the system's media volume, the
+ * one its buttons set: to the right is louder, and a slide across the whole
+ * width goes from silent to full.
+ */
+private suspend fun AwaitPointerEventScope.louden(down: PointerInputChange, hud: PlayerHud, audio: AudioManager) {
+    val stream = AudioManager.STREAM_MUSIC
+    val min = audio.getStreamMinVolume(stream)
+    val max = audio.getStreamMaxVolume(stream)
+    if (max <= min || audio.isVolumeFixed) {
+        hud.say("这台设备的音量不能调")
+        untilUp(down)
+        return
+    }
+    val from = audio.getStreamVolume(stream)
+    while (true) {
+        val by = slid(down) ?: return
+        val to = (from + by * (max - min)).roundToInt().coerceIn(min, max)
+        if (to != audio.getStreamVolume(stream)) audio.setStreamVolume(stream, to, 0) // no system panel: the word on the video says it
+        hud.say("音量 ${(to - min) * 100 / (max - min)}%")
     }
 }
 
