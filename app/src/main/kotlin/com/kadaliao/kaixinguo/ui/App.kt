@@ -38,6 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfoV2
+import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteDefaults
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffold
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldDefaults
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
@@ -49,6 +50,7 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -82,6 +84,13 @@ fun App(model: AppModel, router: Router, covers: CoverStore, video: ExoVideo, in
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
             NavigationSuiteScaffold(
                 layoutType = layout,
+                // The bar and the rail show the page's color behind them, flat
+                // as the bars over the pages. Clear rather than that color:
+                // Material tints a bar the color of `surface` by its elevation.
+                navigationSuiteColors = NavigationSuiteDefaults.colors(
+                    navigationBarContainerColor = Color.Transparent,
+                    navigationRailContainerColor = Color.Transparent,
+                ),
                 navigationSuiteItems = {
                     for (t in Tab.entries) {
                         val on = router.tab == t

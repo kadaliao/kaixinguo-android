@@ -25,7 +25,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.RemoveCircleOutline
@@ -199,7 +198,7 @@ fun HotView() {
             CardGrid {
                 hot.boards.filter { it.items.isNotEmpty() }.forEachIndexed { bi, b ->
                     line("board$bi") {
-                        Text(b.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 12.dp))
+                        Text(b.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 12.dp))
                     }
                     itemsIndexed(b.items, key = { i, _ -> "$bi/$i" }) { _, it ->
                         CardView(
@@ -259,7 +258,7 @@ fun MineScreen() {
 
 @Composable
 private fun SectionTitle(title: String) {
-    Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+    Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
 }
 
 /** WatchCard is a series in the history, how far the viewer got, and a way to go on. */
@@ -274,7 +273,7 @@ private fun WatchCard(watch: Watch) {
         Column(
             Modifier
                 .width(96.dp)
-                .clip(RoundedCornerShape(9.dp))
+                .clip(MaterialTheme.shapes.medium)
                 .combinedClickable(
                     onClick = { router.open(Route.Series(watch.seriesID)) },
                     onLongClick = {
@@ -283,7 +282,7 @@ private fun WatchCard(watch: Watch) {
                     },
                 ),
         ) {
-            Poster(watch.cover, radius = 9.dp) {
+            Poster(watch.cover) {
                 if (!watch.finished && watch.duration > 0) {
                     val f = (watch.position / watch.duration).coerceIn(0.0, 1.0).toFloat()
                     Box(

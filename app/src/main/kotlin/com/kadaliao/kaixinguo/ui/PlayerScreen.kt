@@ -61,7 +61,6 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
 import androidx.compose.material.icons.automirrored.filled.Undo
@@ -632,7 +631,7 @@ private suspend fun AwaitPointerEventScope.louden(down: PointerInputChange, hud:
     }
 }
 
-private val danmakuStyle = TextStyle(color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+private val danmakuStyle = TextStyle(color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Normal)
 
 /**
  * DanmakuLayer flies the episode's comments right to left across the top
@@ -663,7 +662,7 @@ private fun DanmakuLayer(modifier: Modifier) {
             val lane = em * 1.6f
             val lanes = Lanes(comments, size.width / em)
             val texts = arrayOfNulls<TextLayoutResult>(lanes.flights.size) // each measured as it first shows
-            val edge = Stroke(width = 2.dp.toPx(), join = StrokeJoin.Round)
+            val edge = Stroke(width = 1.5.dp.toPx(), join = StrokeJoin.Round)
             onDrawBehind {
                 val ms = now
                 if (ms < 0) return@onDrawBehind
@@ -671,7 +670,7 @@ private fun DanmakuLayer(modifier: Modifier) {
                     val f = lanes.flights[i]
                     val text = texts[i] ?: measurer.measure(f.comment.text, danmakuStyle, softWrap = false, maxLines = 1).also { texts[i] = it }
                     val at = Offset(x * em, f.lane * lane + (lane - text.size.height) / 2)
-                    drawText(text, Color.Black.copy(alpha = 0.7f), at, drawStyle = edge)
+                    drawText(text, Color.Black.copy(alpha = 0.55f), at, drawStyle = edge)
                     drawText(text, topLeft = at)
                 }
             }
@@ -1070,7 +1069,7 @@ private fun EpisodeBar(open: () -> Unit) {
     val total = LocalModel.current.player.page?.episodes?.size ?: 0
     Row(
         Modifier.navigationBarsPadding().padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp)
-            .fillMaxWidth().height(44.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF262626))
+            .fillMaxWidth().height(44.dp).clip(MaterialTheme.shapes.medium).background(Color(0xFF262626))
             .clickable(onClick = open).padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

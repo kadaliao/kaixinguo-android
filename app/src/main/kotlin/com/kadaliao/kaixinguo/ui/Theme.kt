@@ -1,11 +1,14 @@
 package com.kadaliao.kaixinguo.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 
 // The pistachio green of the app's icon: deeper on light backgrounds,
 // brighter on dark ones, as the iOS app's accent color.
@@ -66,13 +69,24 @@ private val dark = darkColorScheme(
 /** The player is dark whatever the system's look, around a black video. */
 private val player = dark.copy(background = Color.Black, surface = Color(0xFF121212), surfaceContainerLow = Color(0xFF171717))
 
+/**
+ * The few corners the app rounds things to: small for an episode's number,
+ * medium for posters, cards and bars, and large for Material's own bigger
+ * surfaces. Corners come from here rather than numbers here and there.
+ */
+private val shapes = Shapes(
+    small = RoundedCornerShape(8.dp),
+    medium = RoundedCornerShape(12.dp),
+    large = RoundedCornerShape(16.dp),
+)
+
 /** KaixinguoTheme follows the system's light or dark look. */
 @Composable
 fun KaixinguoTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) dark else light, content = content)
+    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) dark else light, shapes = shapes, content = content)
 }
 
 @Composable
 fun PlayerTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = player, content = content)
+    MaterialTheme(colorScheme = player, shapes = shapes, content = content)
 }

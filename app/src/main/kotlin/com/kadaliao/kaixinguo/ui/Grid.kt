@@ -84,7 +84,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
@@ -111,13 +110,26 @@ fun isWide(): Boolean = LocalConfiguration.current.screenWidthDp >= 600
 @Composable
 fun cellWidth(): Dp = if (isWide()) 150.dp else 104.dp
 
+/**
+ * The bars over pages are the page's own color, scrolled or not: a flat
+ * bar, not Material's tinted one that lifts off what scrolls under it.
+ */
+@Composable
+private fun flatBar() = TopAppBarDefaults.topAppBarColors(
+    containerColor = MaterialTheme.colorScheme.background,
+    scrolledContainerColor = MaterialTheme.colorScheme.background,
+)
+
 /** Page is a tab's own page: its title in a bar, over what it shows. */
 @Composable
 fun Page(title: String, content: @Composable BoxScope.() -> Unit) {
-    val bar = TopAppBarDefaults.pinnedScrollBehavior()
     Scaffold(
-        modifier = Modifier.nestedScroll(bar.nestedScrollConnection),
-        topBar = { TopAppBar(title = { Text(title, fontWeight = FontWeight.Bold) }, scrollBehavior = bar) },
+        topBar = {
+            TopAppBar(
+                title = { Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold) },
+                colors = flatBar(),
+            )
+        },
         contentWindowInsets = WindowInsets(0),
     ) { padding ->
         Box(Modifier.padding(padding).fillMaxSize(), content = content)
@@ -133,6 +145,7 @@ fun BackBar(title: String = "") {
         navigationIcon = {
             IconButton(onClick = router::back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回") }
         },
+        colors = flatBar(),
     )
 }
 
@@ -305,7 +318,7 @@ fun CardView(card: Card, modifier: Modifier = Modifier) {
     Box(modifier) {
         Column(
             Modifier
-                .clip(RoundedCornerShape(10.dp))
+                .clip(MaterialTheme.shapes.medium)
                 .combinedClickable(
                     onClick = { playCard?.invoke(card) ?: router.open(Route.Series(card.id)) },
                     onLongClick = {
@@ -372,8 +385,8 @@ fun RankBadge(rank: Int, modifier: Modifier = Modifier) {
 
 /** Poster is a cover in a rounded 3:4 frame, gray until it loads. */
 @Composable
-fun Poster(url: String, modifier: Modifier = Modifier, radius: Dp = 10.dp, overlay: @Composable BoxScope.() -> Unit = {}) {
-    val shape = RoundedCornerShape(radius)
+fun Poster(url: String, modifier: Modifier = Modifier, overlay: @Composable BoxScope.() -> Unit = {}) {
+    val shape = MaterialTheme.shapes.medium
     Box(
         modifier
             .fillMaxWidth()

@@ -32,7 +32,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -141,7 +140,7 @@ private fun SeriesBody(sp: SeriesPage, series: Series) {
                 IconButton(onClick = router::back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回") }
             },
             colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = if (titleInBar) MaterialTheme.colorScheme.surfaceContainer else Color.Transparent,
+                containerColor = if (titleInBar) MaterialTheme.colorScheme.background else Color.Transparent,
             ),
         )
     }
@@ -162,8 +161,7 @@ private fun Hero(sp: SeriesPage, series: Series, wide: Boolean) {
             ) {
                 Poster(
                     series.coverUrl,
-                    Modifier.width(if (wide) 200.dp else 118.dp).shadow(18.dp, RoundedCornerShape(12.dp), clip = false),
-                    radius = 12.dp,
+                    Modifier.width(if (wide) 200.dp else 118.dp).shadow(8.dp, MaterialTheme.shapes.medium, clip = false),
                 )
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(if (wide) 10.dp else 6.dp)) {
                     Text(
@@ -265,7 +263,7 @@ private fun Episodes(sp: SeriesPage, wide: Boolean) {
     ) {
         SeasonChips(sp, side, Modifier.bleed(side)) { se -> router.replaceTop(Route.Series(se.seriesId)) }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("选集", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            Text("选集", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.width(8.dp))
             Text("共 ${sp.episodes.size} 集", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.weight(1f))
@@ -373,7 +371,7 @@ fun EpisodeChip(episode: Episode, current: Boolean, watched: Boolean, modifier: 
         modifier
             .alpha(if (episode.playable) 1f else 0.45f)
             .height(40.dp)
-            .clip(RoundedCornerShape(9.dp))
+            .clip(MaterialTheme.shapes.small)
             .background(if (current) c.primary else c.onSurface.copy(alpha = 0.07f))
             .clickable(enabled = episode.playable, onClick = onClick),
         contentAlignment = Alignment.Center,
