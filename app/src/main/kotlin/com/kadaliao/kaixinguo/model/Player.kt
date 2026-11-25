@@ -433,6 +433,15 @@ class Player internal constructor(
         video.play()
     }
 
+    /**
+     * What a TV remote's OK does to the video: tries the episode again after
+     * a failure, as the remote can't easily reach the button that says so,
+     * and otherwise pauses it or plays it on.
+     */
+    fun ok() {
+        if (state is PlayerState.Failed) retry() else togglePause()
+    }
+
     /** Moves d seconds on through the episode, or back when d is negative. */
     fun skip(d: Double) {
         if (!video.hasItem) return

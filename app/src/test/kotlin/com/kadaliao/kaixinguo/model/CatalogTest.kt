@@ -385,6 +385,33 @@ class CatalogTest {
         assertEquals(2, p.number) // the timer is spent
     }
 
+    /** A TV remote's OK tries a failed episode again, and otherwise pauses the video or plays it on. */
+    @Test
+    fun remoteOk() = runTest {
+        val catalog = FakeCatalog()
+        val video = FakeVideo()
+        val model = testModel(backgroundScope, catalog, video)
+        catalog.series["1"] = Series(id = "1", title = "浅浅归聿", episodeCount = 2, platform = PlatformType.OUTER)
+        catalog.episodes["1"] = episodes("1", 2)
+        val p = model.player
+        p.play("1", 1)
+        runCurrent()
+        assertTrue(p.state is PlayerState.Failed) // the server gave nothing
+
+        catalog.playable("1", 2)
+        p.ok()
+        runCurrent()
+        assertEquals("1e1", video.loaded?.episodeId)
+        assertEquals(PlayerState.Buffering, p.state)
+        assertTrue(video.wantsToPlay)
+
+        video.reports(TimeControl.PLAYING)
+        p.ok()
+        assertFalse(video.wantsToPlay)
+        p.ok()
+        assertTrue(video.wantsToPlay)
+    }
+
     /** A player waiting for a series that fails to load says why, rather than spinning forever. */
     @Test
     fun playerSaysWhySeriesFailed() = runTest {

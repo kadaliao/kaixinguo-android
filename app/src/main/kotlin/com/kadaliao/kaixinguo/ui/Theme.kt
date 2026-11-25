@@ -2,11 +2,16 @@ package com.kadaliao.kaixinguo.ui
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.ripple.RippleAlpha
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RippleConfiguration
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
@@ -80,13 +85,27 @@ private val shapes = Shapes(
     large = RoundedCornerShape(16.dp),
 )
 
+/**
+ * On a TV the remote's focus is all the viewer has to go by, seen from
+ * across the room: what has it shows a much stronger shade than Material's
+ * faint one. Elsewhere focus comes only with a keyboard, and stays as it was.
+ */
+private val tvRipple = RippleConfiguration(rippleAlpha = RippleAlpha(draggedAlpha = 0.16f, focusedAlpha = 0.28f, hoveredAlpha = 0.08f, pressedAlpha = 0.16f))
+
+@Composable
+private fun Themed(colors: ColorScheme, content: @Composable () -> Unit) {
+    MaterialTheme(colorScheme = colors, shapes = shapes) {
+        if (isTv()) CompositionLocalProvider(LocalRippleConfiguration provides tvRipple, content = content) else content()
+    }
+}
+
 /** KaixinguoTheme follows the system's light or dark look. */
 @Composable
 fun KaixinguoTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) dark else light, shapes = shapes, content = content)
+    Themed(if (isSystemInDarkTheme()) dark else light, content)
 }
 
 @Composable
 fun PlayerTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = player, shapes = shapes, content = content)
+    Themed(player, content)
 }

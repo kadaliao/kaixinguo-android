@@ -2,6 +2,7 @@
 
 package com.kadaliao.kaixinguo.ui
 
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
@@ -67,6 +68,8 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -80,6 +83,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -106,6 +110,18 @@ import kotlinx.coroutines.launch
 /** Whether the window is wide enough for a tablet's layout. */
 @Composable
 fun isWide(): Boolean = LocalConfiguration.current.screenWidthDp >= 600
+
+/** Whether the app runs on a TV, worked with a remote rather than by touch. */
+@Composable
+fun isTv(): Boolean =
+    (LocalConfiguration.current.uiMode and Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION
+
+/**
+ * The card a page's remote focus rested on last, kept with the page's
+ * state: coming back to the page, or out of the player over it, puts the
+ * focus back on it. Null away from a TV, and outside the tabs' pages.
+ */
+val LocalFocusedCard = compositionLocalOf<MutableState<String?>?> { null }
 
 /** The narrowest a poster in a grid gets: about three across a phone. */
 @Composable
@@ -317,9 +333,23 @@ fun CardView(card: Card, modifier: Modifier = Modifier) {
     val haptic = LocalHapticFeedback.current
     val saved = model.favorites.has(card.id)
     var menu by remember { mutableStateOf(false) }
+    var focused by remember { mutableStateOf(false) }
+    val focus = remember { FocusRequester() }
+    val last = LocalFocusedCard.current
+    if (last != null) {
+        val presented = model.player.isPresented
+        LaunchedEffect(presented) {
+            if (!presented && last.value == card.id) runCatching { focus.requestFocus() }
+        }
+    }
     Box(modifier) {
         Column(
             Modifier
+                .focusRequester(focus)
+                .onFocusChanged {
+                    focused = it.isFocused
+                    if (it.isFocused) last?.value = card.id
+                }
                 .clip(MaterialTheme.shapes.medium)
                 .combinedClickable(
                     onClick = { playCard?.invoke(card) ?: router.open(Route.Series(card.id)) },
@@ -329,7 +359,7 @@ fun CardView(card: Card, modifier: Modifier = Modifier) {
                     },
                 ),
         ) {
-            Poster(card.cover) {
+            Poster(card.cover, focused = focused) {
                 if (card.rank > 0) RankBadge(card.rank, Modifier.align(Alignment.TopStart).padding(6.dp))
             }
             Spacer(Modifier.height(7.dp))
@@ -385,16 +415,17 @@ fun RankBadge(rank: Int, modifier: Modifier = Modifier) {
     }
 }
 
-/** Poster is a cover in a rounded 3:4 frame, gray until it loads. */
+/** Poster is a cover in a rounded 3:4 frame, gray until it loads; ringed in the accent color while its card has the focus. */
 @Composable
-fun Poster(url: String, modifier: Modifier = Modifier, overlay: @Composable BoxScope.() -> Unit = {}) {
+fun Poster(url: String, modifier: Modifier = Modifier, focused: Boolean = false, overlay: @Composable BoxScope.() -> Unit = {}) {
     val shape = MaterialTheme.shapes.medium
+    val c = MaterialTheme.colorScheme
     Box(
         modifier
             .fillMaxWidth()
             .aspectRatio(3f / 4f)
             .clip(shape)
-            .border(0.5.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f), shape),
+            .border(if (focused) 3.dp else 0.5.dp, if (focused) c.primary else c.onSurface.copy(alpha = 0.06f), shape),
     ) {
         CoverImage(url, Modifier.fillMaxSize())
         overlay()

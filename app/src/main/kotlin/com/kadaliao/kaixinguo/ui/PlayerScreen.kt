@@ -137,7 +137,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -151,6 +153,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -240,27 +243,42 @@ fun PlayerScreen(inPip: Boolean) {
         if (picked != null) model.playSeason(picked.id) else if (resumeAfterSearch) video.play()
     }
 
-    BackHandler(enabled = !inPip) { if (searching) closeSearch(null) else player.leave() }
+    // The video itself takes the keys; on a TV the remote also visits the bar over it and the episodes beside it.
+    val tv = isTv()
+    val keys = remember { FocusRequester() }
+    val episodes = remember { FocusRequester() }
+    var videoFocused by remember { mutableStateOf(false) }
+
+    // Back closes the search, then on a TV brings the remote back to the video, then leaves.
+    fun back() {
+        if (searching) return closeSearch(null)
+        if (tv && !videoFocused && runCatching { keys.requestFocus() }.getOrDefault(false)) return
+        player.leave()
+    }
+
+    BackHandler(enabled = !inPip, onBack = ::back)
     PlayerWindow(
         hideBars = landscape || inPip || !hud.chrome,
         keepOn = !player.paused && (player.state == PlayerState.Playing || player.state == PlayerState.Buffering),
     )
     if (!inPip) ChromeTimer(hud, busy = showEpisodes || searching)
     PlayerTheme {
-        val keys = remember { FocusRequester() }
         LaunchedEffect(searching) { if (!searching) runCatching { keys.requestFocus() } }
         // Upright, the bars come and go with the controls: laid out as if they showed, nothing moves.
         CompositionLocalProvider(LocalSteadyBars provides !landscape) {
             Box(
                 Modifier.fillMaxSize().background(Color.Black)
-                    .focusRequester(keys).focusable()
-                    .onPreviewKeyEvent { e -> !searching && e.type == KeyEventType.KeyDown && playerKey(player, e.key).also { if (it) hud.poke() } },
+                    .focusRequester(keys).onFocusChanged { videoFocused = it.isFocused }.focusable()
+                    .onPreviewKeyEvent { e ->
+                        !searching && e.type == KeyEventType.KeyDown &&
+                            (if (tv) videoFocused && remoteKey(player, hud, e, episodes) else playerKey(player, e.key)).also { if (it) hud.poke() }
+                    },
             ) {
                 // One layout for all, so the video keeps its place, and its
                 // surface, as the device turns or picture in picture starts.
                 Row(Modifier.fillMaxSize()) {
                     Column(Modifier.weight(1f).fillMaxHeight()) {
-                        VideoArea(hud, brightness, edge = landscape || panel, chrome = !inPip, rotation = rotation, landscape = landscape, search = ::openSearch, modifier = Modifier.weight(1f).fillMaxWidth())
+                        VideoArea(hud, brightness, edge = landscape || panel, chrome = !inPip, rotation = rotation.takeUnless { tv }, landscape = landscape, search = ::openSearch, video = keys, modifier = Modifier.weight(1f).fillMaxWidth())
                         if (!inPip && !landscape && !panel) {
                             Chrome(hud, tapToShow = true) { EpisodeBar { showEpisodes = true } }
                         }
@@ -270,6 +288,7 @@ fun PlayerScreen(inPip: Boolean) {
                             Modifier.width(320.dp).fillMaxHeight().background(Color(0xFF171717))
                                 .windowInsetsPadding(systemBars().only(WindowInsetsSides.Vertical + WindowInsetsSides.End)),
                             steps = true,
+                            focus = episodes,
                         )
                     }
                 }
@@ -299,6 +318,25 @@ private fun playerKey(player: Player, key: Key): Boolean {
         Key.DirectionUp -> player.step(-1)
         Key.DirectionDown -> player.step(1)
         Key.Escape -> player.leave()
+        else -> return false
+    }
+    return true
+}
+
+/**
+ * The keys of a TV's remote while the video has the focus: OK pauses, left
+ * and right go back and on 10 seconds, up goes to the bar over the video,
+ * and down to the episodes beside it, where the arrows move between them.
+ */
+private fun remoteKey(player: Player, hud: PlayerHud, e: KeyEvent, episodes: FocusRequester): Boolean {
+    when (e.key) {
+        // Once a press: held, the remote repeats it.
+        Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.Spacebar -> if (e.nativeKeyEvent.repeatCount == 0) player.ok()
+        Key.DirectionLeft -> player.skip(-10.0)
+        Key.DirectionRight -> player.skip(10.0)
+        // The bar may have faded away: the key brings it back, and it takes the focus as it shows.
+        Key.DirectionUp -> hud.toBar = true
+        Key.DirectionDown -> runCatching { episodes.requestFocus() }
         else -> return false
     }
     return true
@@ -510,6 +548,10 @@ private class PlayerHud {
     var scrubbing by mutableStateOf(false)
     var menus by mutableIntStateOf(0)
 
+    /** Whether a TV remote's focus is in the top bar, which keeps the controls; and whether it is to go there as the bar shows. */
+    var inBar by mutableStateOf(false)
+    var toBar by mutableStateOf(false)
+
     /** The brightness or volume a swipe at the side sets, while it shows; and whether the swipe goes on. */
     var level by mutableStateOf<Level?>(null)
     var adjusting = false
@@ -554,9 +596,10 @@ private val shadowed = TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.4f),
  * the top, how far it has got at the bottom, and what a press, a pause or a
  * failure shows. The video goes up under the status bar; `edge` says it
  * goes down to the bottom of the screen too, with no episode bar below.
+ * `video` takes a remote's focus back down to the video from the top bar.
  */
 @Composable
-private fun VideoArea(hud: PlayerHud, brightness: Brightness?, edge: Boolean, chrome: Boolean, rotation: Rotation?, landscape: Boolean, search: () -> Unit, modifier: Modifier) {
+private fun VideoArea(hud: PlayerHud, brightness: Brightness?, edge: Boolean, chrome: Boolean, rotation: Rotation?, landscape: Boolean, search: () -> Unit, video: FocusRequester, modifier: Modifier) {
     Box(modifier.clipToBounds()) {
         VideoSurface(Modifier.fillMaxSize().offset { IntOffset(0, hud.offset.roundToInt()) })
         if (!chrome) return@Box
@@ -570,7 +613,7 @@ private fun VideoArea(hud: PlayerHud, brightness: Brightness?, edge: Boolean, ch
         PauseMark(Modifier.align(Alignment.Center))
         PlayerOverlay()
         Column(Modifier.fillMaxSize()) {
-            Chrome(hud) { TopBar(hud, rotation, landscape, search) }
+            Chrome(hud) { TopBar(hud, rotation, landscape, search, video) }
             SpeedHint(hud)
             Spacer(Modifier.weight(1f))
             // With nothing under the video, the bar keeps clear of the system's.
@@ -637,7 +680,7 @@ private fun ChromeTimer(hud: PlayerHud, busy: Boolean) {
     val talkBack = remember(context) { context.getSystemService(AccessibilityManager::class.java)?.isTouchExplorationEnabled == true }
     val playing = player.state == PlayerState.Playing && !player.paused
     val swiping by remember { derivedStateOf { hud.offset != 0f } }
-    val held = busy || talkBack || hud.holding || hud.level != null || hud.scrubbing || hud.menus > 0 || swiping
+    val held = busy || talkBack || hud.holding || hud.level != null || hud.scrubbing || hud.menus > 0 || hud.inBar || swiping
     LaunchedEffect(hud.touches, hud.chrome, playing, held) {
         if (!hud.chrome || !playing || held) return@LaunchedEffect
         delay(CHROME_FOR)
@@ -953,13 +996,27 @@ private fun PlayerOverlay() {
 
 // MARK: - Over the video
 
-/** TopBar is what plays, and how fast, over the top of the video, with the way out, to turn the screen, to search and to more. */
+/**
+ * TopBar is what plays, and how fast, over the top of the video, with the
+ * way out, to turn the screen, to search and to more. A remote comes into
+ * it at the speed, as [PlayerHud.toBar] asks, and goes down from it to the
+ * video; while it is in the bar, the bar stays.
+ */
 @Composable
-private fun TopBar(hud: PlayerHud, rotation: Rotation?, landscape: Boolean, search: () -> Unit) {
+private fun TopBar(hud: PlayerHud, rotation: Rotation?, landscape: Boolean, search: () -> Unit, video: FocusRequester) {
     val player = LocalModel.current.player
+    val speed = remember { FocusRequester() }
+    // Here, not where the key is pressed: the bar may only now be back.
+    LaunchedEffect(hud.toBar) {
+        if (!hud.toBar) return@LaunchedEffect
+        hud.toBar = false
+        runCatching { speed.requestFocus() }
+    }
     Box(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.5f), Color.Transparent)))) {
         Row(
             Modifier.fillMaxWidth()
+                .focusProperties { down = video }
+                .onFocusChanged { hud.inBar = it.hasFocus }
                 .windowInsetsPadding(statusBars().union(WindowInsets.displayCutout).only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                 .padding(start = 4.dp, end = 4.dp, bottom = 20.dp).height(48.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -973,7 +1030,7 @@ private fun TopBar(hud: PlayerHud, rotation: Rotation?, landscape: Boolean, sear
                     Text(it, color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.bodySmall.merge(shadowed), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            SpeedMenu(hud)
+            SpeedMenu(hud, Modifier.focusRequester(speed))
             if (rotation != null) RotateButton(hud, rotation, landscape)
             IconButton(onClick = search) { Icon(Icons.Filled.Search, contentDescription = "搜索", tint = Color.White) }
             MoreMenu(hud)
@@ -1016,13 +1073,13 @@ private fun HoldsChrome(hud: PlayerHud, open: Boolean) {
 
 /** SpeedMenu shows the speed the video plays at, and changes it. */
 @Composable
-private fun SpeedMenu(hud: PlayerHud) {
+private fun SpeedMenu(hud: PlayerHud, modifier: Modifier = Modifier) {
     val player = LocalModel.current.player
     var open by remember { mutableStateOf(false) }
     HoldsChrome(hud, open)
     Box {
         Row(
-            Modifier.clip(CircleShape).clickable { open = true }.height(44.dp).padding(horizontal = 8.dp),
+            modifier.clip(CircleShape).clickable { open = true }.height(44.dp).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(Icons.Filled.Speed, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
@@ -1390,10 +1447,11 @@ private fun episodeLine(player: Player): String {
 /**
  * EpisodePanel is the series' title and its episodes, beside the video on
  * tablets, with buttons to move between them, and in a sheet on phones,
- * which `picked` closes once something plays.
+ * which `picked` closes once something plays. `focus` takes a remote's
+ * focus to the episode playing.
  */
 @Composable
-private fun EpisodePanel(modifier: Modifier = Modifier, steps: Boolean = false, picked: () -> Unit = {}) {
+private fun EpisodePanel(modifier: Modifier = Modifier, steps: Boolean = false, focus: FocusRequester? = null, picked: () -> Unit = {}) {
     val model = LocalModel.current
     val player = model.player
     val sp = player.page
@@ -1443,7 +1501,8 @@ private fun EpisodePanel(modifier: Modifier = Modifier, steps: Boolean = false, 
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             items(episodes, key = { it.id }) { e ->
-                EpisodeChip(e, e.number == player.number, e.number in watched) {
+                val current = e.number == player.number
+                EpisodeChip(e, current, e.number in watched, if (current && focus != null) Modifier.focusRequester(focus) else Modifier) {
                     if (e.number != player.number) player.play(sp.id, e.number)
                     picked()
                 }

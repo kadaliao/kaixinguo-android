@@ -46,6 +46,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
@@ -149,6 +151,7 @@ private fun TabHost(router: Router) {
         router.forget = { holder.removeState(it) }
         onDispose { router.forget = null }
     }
+    val tv = isTv()
     val stack = router.path(router.tab)
     val entry = Entry(router.tab, stack.size, stack.lastOrNull())
     AnimatedContent(
@@ -169,16 +172,19 @@ private fun TabHost(router: Router) {
         label = "pages",
     ) { e ->
         holder.SaveableStateProvider(e.key) {
-            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-                when (val r = e.route) {
-                    null -> when (e.tab) {
-                        Tab.DISCOVER -> DiscoverScreen()
-                        Tab.RANK -> RankScreen()
-                        Tab.NEW -> NewReleasesScreen()
-                        Tab.MINE -> MineScreen()
-                        Tab.SEARCH -> SearchScreen()
+            val focused = rememberSaveable { mutableStateOf<String?>(null) }
+            CompositionLocalProvider(LocalFocusedCard provides focused.takeIf { tv }) {
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                    when (val r = e.route) {
+                        null -> when (e.tab) {
+                            Tab.DISCOVER -> DiscoverScreen()
+                            Tab.RANK -> RankScreen()
+                            Tab.NEW -> NewReleasesScreen()
+                            Tab.MINE -> MineScreen()
+                            Tab.SEARCH -> SearchScreen()
+                        }
+                        is Route.Series -> SeriesScreen(r.id)
                     }
-                    is Route.Series -> SeriesScreen(r.id)
                 }
             }
         }

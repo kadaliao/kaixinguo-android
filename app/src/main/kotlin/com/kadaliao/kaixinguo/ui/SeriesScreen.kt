@@ -57,6 +57,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -71,6 +72,8 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
@@ -220,7 +223,8 @@ private fun About(series: Series) {
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier
             .animateContentSize()
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { expanded = !expanded },
+            // No ripple for a finger; a TV's remote needs to see it has the text.
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = if (isTv()) ripple() else null) { expanded = !expanded },
     )
 }
 
@@ -231,9 +235,15 @@ private fun Actions(sp: SeriesPage, series: Series, wide: Boolean) {
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         if (sp.episodes.isNotEmpty() && !sp.isBook) {
             val r = model.resumePoint(sp)
+            // On a TV the remote starts here, and comes back here from the player: OK plays on.
+            val focus = remember { FocusRequester() }
+            if (isTv()) {
+                val presented = model.player.isPresented
+                LaunchedEffect(presented) { if (!presented) runCatching { focus.requestFocus() } }
+            }
             Button(
                 onClick = { model.player.play(r.seriesID, r.number, r.start) },
-                modifier = (if (wide) Modifier else Modifier.weight(1f)).height(48.dp),
+                modifier = (if (wide) Modifier else Modifier.weight(1f)).height(48.dp).focusRequester(focus),
             ) {
                 Icon(Icons.Filled.PlayArrow, contentDescription = null)
                 Spacer(Modifier.width(6.dp))
