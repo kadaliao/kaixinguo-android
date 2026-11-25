@@ -4,6 +4,8 @@
 
 ## [未发布]
 
+## [0.8.0] - 2026-11-25
+
 ### 新增
 
 - 投屏：播放页顶部的投屏按钮，投到同一个 Wi-Fi 里支持 DLNA 的电视、盒子或投影仪。视频仍由手机解密，电视从手机取；投屏时手机就是遥控器，点画面暂停、拖进度条、上下滑换集都对电视生效，右边上下滑调电视的音量，通知栏和锁屏也能控制，退到后台或熄屏电视照样放，一集放完接着放下一集。按钮里点「停止投屏，在手机上看」，从电视放到的地方接着在手机上放
@@ -122,7 +124,8 @@
 - 投屏只能用系统的屏幕镜像
 - HarmonyOS NEXT（纯血鸿蒙）不能直接安装 APK
 
-[未发布]: https://github.com/kadaliao/kaixinguo-android/compare/v0.7.0...HEAD
+[未发布]: https://github.com/kadaliao/kaixinguo-android/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/kadaliao/kaixinguo-android/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/kadaliao/kaixinguo-android/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/kadaliao/kaixinguo-android/compare/v0.5.3...v0.6.0
 [0.5.3]: https://github.com/kadaliao/kaixinguo-android/compare/v0.5.2...v0.5.3
