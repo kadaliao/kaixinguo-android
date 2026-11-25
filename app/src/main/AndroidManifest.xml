@@ -9,6 +9,11 @@
     <!-- One APK for phones, tablets and TVs: a TV has no touchscreen, and a phone isn't a TV. -->
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.software.leanback" android:required="false" />
+    <!-- Casting: finds televisions on the Wi-Fi (SSDP), and keeps the Wi-Fi up while one fetches the episode. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Casting asks for the Wi-Fi, but a TV box on Ethernet runs the app too. -->
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
 
     <application
         android:name=".KaixinguoApplication"

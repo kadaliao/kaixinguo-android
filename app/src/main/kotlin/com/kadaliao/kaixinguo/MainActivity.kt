@@ -3,6 +3,7 @@ package com.kadaliao.kaixinguo
 import android.app.PictureInPictureParams
 import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.net.Uri
@@ -40,6 +41,7 @@ import kotlinx.coroutines.launch
  */
 class MainActivity : ComponentActivity() {
     private val app get() = application as KaixinguoApplication
+    private val debuggable get() = applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
     private var inPip by mutableStateOf(false)
     private var pipWanted = false
     private var controller: ListenableFuture<MediaController>? = null
@@ -50,7 +52,7 @@ class MainActivity : ComponentActivity() {
         val model = app.model
         setContent {
             KaixinguoTheme {
-                if (model == null) StartFailed(app.startError) else App(model, app.router, app.covers, app.video, inPip)
+                if (model == null) StartFailed(app.startError) else App(model, app.router, app.covers, app.cast, inPip)
             }
         }
         if (model == null) return
@@ -59,11 +61,14 @@ class MainActivity : ComponentActivity() {
         val link = if (savedInstanceState == null) intent?.data?.takeIf { it.scheme == "kaixinguo" } else null
         model.reopenPlayer(open = link == null)
         link?.let { open(it, model) }
-        // Picture in picture follows the episode: on while it plays.
+        // Debug builds take a television's description URL, for an emulator, whose network a search can't leave:
+        // adb shell am start -n com.kadaliao.kaixinguo/.MainActivity --es kx_renderer http://10.0.2.2:8200/desc.xml
+        if (debuggable) intent?.getStringExtra("kx_renderer")?.let { app.cast.add(it) }
+        // Picture in picture follows the episode: on while it plays, here rather than on a television.
         lifecycleScope.launch {
             snapshotFlow {
                 val p = model.player
-                val wanted = p.isPresented && !p.paused && (p.state == PlayerState.Playing || p.state == PlayerState.Buffering)
+                val wanted = p.isPresented && !p.paused && (p.state == PlayerState.Playing || p.state == PlayerState.Buffering) && app.cast.device == null
                 wanted to app.video.aspect
             }.collect { (wanted, _) ->
                 pipWanted = wanted
@@ -74,6 +79,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (debuggable) intent.getStringExtra("kx_renderer")?.let { app.cast.add(it) }
         val model = app.model ?: return
         intent.data?.let { open(it, model) }
     }

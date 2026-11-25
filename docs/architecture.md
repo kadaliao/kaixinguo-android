@@ -44,6 +44,10 @@ flowchart LR
 | `cenc/Cenc.kt` | 把 CENC 加密的 MP4 按字节区间还原成明文 | `Sources/CENC/CENC.swift` |
 | `playback/Streams.kt` | `StreamRegistry`、`StreamSource`、`CencDataSource`：按区间下载、解密、交给 ExoPlayer；预读文件开头 | `StreamLoader.swift` |
 | `playback/ExoVideo.kt` | 唯一的 ExoPlayer，实现 `model.Video` 接口；音量超过系统最大时的增益 | `Player.swift` 里的 `AVPlayer`、`AudioBoost.swift` |
+| `playback/CastVideo.kt` | 模型看到的 `Video`：没投屏时转给 `ExoVideo`，投屏时把加载、播放、暂停、拖动变成 DLNA 命令，每秒问电视放到哪里 | `Player.swift` 的投屏部分 |
+| `playback/Dlna.kt` | DLNA：SSDP 找电视、读设备描述、SOAP 命令，自带一个只够用的 HTTP 客户端 | 无（iOS 用 AirPlay） |
+| `playback/StreamServer.kt` | 投屏用的本机 HTTP 服务：按区间把解密后的视频交给电视 | `StreamServer.swift` |
+| `playback/CastSessionPlayer.kt` | 投屏时媒体会话里的播放器：通知栏、锁屏、音量键控制电视 | 无 |
 | `playback/PlaybackService.kt` | 媒体会话：熄屏播放、通知栏和锁屏控制、上一集 / 下一集按钮 | `MPRemoteCommandCenter` 和后台音频 |
 | `model/Player.kt` | 播放流程：解析播放地址、预取和预读下一集、选流、连播、记录进度、倍速、定时关闭、按集加载弹幕 | `Player.swift` |
 | `model/Danmaku.kt` | 弹幕：估算每条的宽度、分道，算出某一时刻每条飘到哪里 | 无 |
@@ -109,6 +113,25 @@ flowchart LR
 - **`PlaybackService`** 是 Media3 的 `MediaSessionService`，包着同一个 ExoPlayer。`MainActivity` 在前台时连着它，开始播放后它把自己升为前台服务，熄屏、锁屏也能接着放，通知栏和锁屏显示剧名、集数和封面。ExoPlayer 一次只放一集，所以会话里的「上一集 / 下一集」按钮用 `ForwardingPlayer` 接到 `Player.step`。
 - **画中画**：正在放的时候离开应用，窗口缩成小窗（Android 12 起由系统自动进入，之前在 `onUserLeaveHint` 里手动进入）。小窗里只显示视频：`PlayerScreen` 收到 `inPip` 后隐藏所有控件，`VideoSurface` 留在原处，画面不中断。点小窗回到播放页；关掉小窗时活动已经停了，`onPictureInPictureModeChanged` 据此判断并退出播放。
 - **离开时暂停**：没进画中画就离开应用（比如用户关掉了画中画权限），`onStop` 调 `Player.leaveApp` 暂停，记下看到哪里、离开时是不是在放；回来时 `onStart` 调 `returnToApp`，离开时在放就接着放，本来暂停的仍然暂停。离开期间从通知栏点了播放或暂停，以那一下为准。只是熄屏的话不暂停，所以可以锁屏听。
+
+### 投屏
+
+Android 上没有 AirPlay，Chromecast 要谷歌服务，所以投屏用 DLNA（UPnP AV），国内的电视、盒子和投影仪基本都支持。思路和 iOS 版一样：电视自己去取视频，手机解密后经本机 HTTP 交给它。
+
+- **找电视**（`Dlna.search`）：在 Wi-Fi 网卡上往 `239.255.255.250:1900` 发 SSDP 的 `M-SEARCH`（找 `MediaRenderer` 和 `AVTransport`），收集回应里的 `LOCATION`，再读设备描述，取名字和 AVTransport、RenderingControl 的控制地址。搜索时拿着 `MulticastLock`，一次搜 4 秒；这一轮没回应的电视从列表里去掉，正在投的除外。
+- **HTTP**：Android 不许应用自己的 HTTP 客户端用明文，电视又只说 HTTP，所以 `Http` 直接在 socket 上说 HTTP/1.1（一个请求一个连接，认 `Content-Length` 和 chunked），不为此放开整个应用的明文限制。
+- **本机服务**（`StreamServer`）：投屏时在系统分配的端口上监听，地址是 Wi-Fi 的 IPv4，路径是登记表里那一集的随机 ID（`/episode/<UUID>.mp4`），不在登记表里的一律 404。支持 `GET`、`HEAD` 和 `Range`（`a-b`、`a-`、`-n`，多段只取第一段），带上 DLNA 要的 `contentFeatures.dlna.org`，每个响应都 `Connection: close`。区间交给一个新的 `CencDataSource` 去读，所以预读、换 CDN、断点重试、解密都和本机播放共用；电视挂断（它拖动时就会）时写入失败，这个下载跟着停。
+- **控制**（`CastVideo`）：它就是交给 `AppModel` 的那个 `Video`。没投屏时一切转给 `ExoVideo`；投屏时 `load` 变成 `SetAVTransportURI`（带 DIDL-Lite 元数据），`play`、`pause`、`seek` 变成 `Play`、`Pause`、`Seek`，命令在自己的线程上按顺序发。每秒问一次 `GetTransportInfo` 和 `GetPositionInfo`，翻译成 `TimeControl` 和进度；两次之间进度按时间往前推，进度条和倍速提示照常。刚发出命令的 2.5 秒里电视报的状态可能还是之前的，不采用。开头要从中间放时，等电视进入播放或暂停后再 `Seek`。电视报 `STOPPED` 时，之前在放、而且停在离结尾 5 秒以内，就算放完，`Player` 接着放下一集；否则当作电视那边停了。连续 5 次问不到，停止投屏，在播放页说明原因。
+- **开始和停止**：投过去时记下手机上的位置和是否在放，`ExoVideo` 清掉当前这一集，电视从那一秒开始；停止时反过来，手机从电视放到的地方接着。投屏期间拿着 Wi-Fi 锁和 `PARTIAL_WAKE_LOCK`，熄屏后服务照样能响应。
+- **后台**：`PlaybackService` 的媒体会话投屏时换成 `CastSessionPlayer`（`SimpleBasePlayer`），它报的是电视的状态，设备类型是远程，音量是电视的（RenderingControl 的 0–100），所以通知栏、锁屏能暂停、拖动、换集，音量键调的是电视；会话在播，前台服务就一直在，应用不会被系统收掉。`Player.leaveApp` 遇到 `video.remote` 不暂停，画中画也不在投屏时进入。
+- **播放页**：投屏时用「正在投屏 / 投屏已暂停」和电视名字盖住画面，不画弹幕，暂停图标也不画；右边上下滑调电视音量，最多 100%；屏幕不再保持常亮，手机只是遥控器。
+- **调试**：模拟器的网络出不了组播，搜不到电视。Debug 构建启动时认 `--es kx_renderer <设备描述 URL>`，直接加上一台电视，配合在电脑上跑的假电视测试：
+
+  ```sh
+  adb shell am start -n com.kadaliao.kaixinguo/.MainActivity --es kx_renderer http://10.0.2.2:8200/desc.xml
+  ```
+
+  电视看到的地址是模拟器内部的 IP，假电视要用 `adb forward` 转到本机再取。
 
 ### 弹幕
 
@@ -192,6 +215,7 @@ flowchart LR
 ./gradlew testDebugUnitTest
 ```
 
+- **DLNA 测试**（`playback/DlnaTest.kt`）：设备描述和 SSDP 回应的解析、时间格式、元数据转义、`Range` 的解析，以及在本机起一个假电视，验证 SOAP 命令的写法、chunked 回应和错误说明。
 - **逻辑测试**（`model/CatalogTest.kt`、`model/SessionTest.kt`、`model/DanmakuTest.kt`、`model/SignerTest.kt`）用 `FakeCatalog` 和 `FakeVideo` 代替 SDK 和 ExoPlayer，不联网，用协程测试的虚拟时间跑重试和定时关闭：分页和去重、缓存合并、自动重试、搜索回退和补封面、选季和续播、播放状态、长按倍速、定时关闭、弹幕的加载和分道、观看记录和收藏的读写（包括 Go 写的文件）、离开再回来和重新启动后回到原处、播放在内置签名和签名服务之间的切换、签名服务的检查（在本机起一个假的服务）和设置的保存。
 - **解密测试**（`cenc/CencTest.kt`）在测试里从零拼出加密的 MP4（用 JDK 自己的 CTR 模式加密，不拿解密器验证自己），覆盖 senc、子样本、saiz/saio、moov 在文件末尾等情况，整段和任意切片解密结果必须一致。
 
@@ -205,5 +229,5 @@ CENC_SAMPLE=enc.mp4 CENC_KEY=<密钥> CENC_CLEAR=clear.mp4 ./gradlew testDebugUn
 
 - 不支持分段（DASH/HLS）和音视频分离的流。
 - 需要登录才能看的集数不能播放，应用不提供登录。
-- 投屏只能用系统的屏幕镜像。
+- 投屏只支持 DLNA，不支持 Chromecast（要谷歌服务）和 AirPlay；手机和电视要在同一个 Wi-Fi 下。投屏时电视按正常速度放，DLNA 改不了倍速。
 - HarmonyOS NEXT 上不能直接安装。

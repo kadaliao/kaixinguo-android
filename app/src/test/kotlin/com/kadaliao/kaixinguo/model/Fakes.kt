@@ -100,6 +100,7 @@ class FakeVideo : Video {
     override var status = TimeControl.PAUSED
     override var speed = 1f
     override var boost = 1f
+    override var remote = false
     override var listener: VideoListener? = null
     var loaded: VideoItem? = null
 

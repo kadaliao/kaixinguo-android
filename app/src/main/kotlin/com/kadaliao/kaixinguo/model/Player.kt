@@ -78,6 +78,9 @@ interface Video {
      * [Player.BOOST_LIMIT]; 1 plays it as loud as the system does.
      */
     var boost: Float
+
+    /** Whether the episode plays somewhere else, as on a television it was cast to, so leaving the app leaves it playing. */
+    val remote: Boolean get() = false
 }
 
 /** Streams makes an episode's file on the CDN playable, decrypting it with its key, and returns its URI. */
@@ -521,10 +524,11 @@ class Player internal constructor(
 
     /**
      * Pauses the episode as the viewer leaves the app, noting where they got
-     * to and whether it played, so that coming back plays it on.
+     * to and whether it played, so that coming back plays it on. Cast to a
+     * television, it plays on there.
      */
     fun leaveApp() {
-        if (!isPresented || away) return
+        if (!isPresented || away || video.remote) return
         playOnReturn = playing
         away = true
         video.pause()

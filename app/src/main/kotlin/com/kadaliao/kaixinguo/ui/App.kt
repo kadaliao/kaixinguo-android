@@ -59,12 +59,12 @@ import androidx.compose.ui.unit.dp
 import com.kadaliao.kaixinguo.covers.CoverStore
 import com.kadaliao.kaixinguo.model.AppModel
 import com.kadaliao.kaixinguo.model.Card
-import com.kadaliao.kaixinguo.playback.ExoVideo
+import com.kadaliao.kaixinguo.playback.CastVideo
 
 val LocalModel = staticCompositionLocalOf<AppModel> { error("no model") }
 val LocalRouter = staticCompositionLocalOf<Router> { error("no router") }
 val LocalCovers = staticCompositionLocalOf<CoverStore> { error("no covers") }
-val LocalVideo = staticCompositionLocalOf<ExoVideo> { error("no video") }
+val LocalVideo = staticCompositionLocalOf<CastVideo> { error("no video") }
 
 /** What tapping a card does in place of opening its series: in the player's search, play it. */
 val LocalPlayCard = compositionLocalOf<((Card) -> Unit)?> { null }
@@ -74,7 +74,7 @@ val LocalPlayCard = compositionLocalOf<((Card) -> Unit)?> { null }
  * side on tablets and unfolded phones; and over them, the player.
  */
 @Composable
-fun App(model: AppModel, router: Router, covers: CoverStore, video: ExoVideo, inPip: Boolean) {
+fun App(model: AppModel, router: Router, covers: CoverStore, video: CastVideo, inPip: Boolean) {
     CompositionLocalProvider(
         LocalModel provides model,
         LocalRouter provides router,

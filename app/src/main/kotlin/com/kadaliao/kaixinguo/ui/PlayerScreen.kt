@@ -82,6 +82,8 @@ import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.BrightnessHigh
 import androidx.compose.material.icons.filled.BrightnessLow
+import androidx.compose.material.icons.filled.Cast
+import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.GridView
@@ -90,6 +92,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.Search
@@ -98,6 +101,7 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.Button
@@ -194,6 +198,7 @@ import com.kadaliao.kaixinguo.model.Player
 import com.kadaliao.kaixinguo.model.PlayerState
 import com.kadaliao.kaixinguo.model.Sleep
 import com.kadaliao.kaixinguo.model.favLabel
+import com.kadaliao.kaixinguo.playback.CastVideo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -259,7 +264,8 @@ fun PlayerScreen(inPip: Boolean) {
     BackHandler(enabled = !inPip, onBack = ::back)
     PlayerWindow(
         hideBars = landscape || inPip || !hud.chrome,
-        keepOn = !player.paused && (player.state == PlayerState.Playing || player.state == PlayerState.Buffering),
+        // Cast, the phone is only a remote, and may sleep.
+        keepOn = LocalVideo.current.device == null && !player.paused && (player.state == PlayerState.Playing || player.state == PlayerState.Buffering),
     )
     if (!inPip) ChromeTimer(hud, busy = showEpisodes || searching)
     PlayerTheme {
@@ -426,25 +432,37 @@ private class Brightness(private val window: Window, private val context: Contex
 /**
  * Volume sets the system's media volume from a swipe, the one its buttons
  * set, without the system's panel; past the system's loudest, the player
- * turns the episode up itself ([Player.chooseBoost]).
+ * turns the episode up itself ([Player.chooseBoost]). Cast, it sets the
+ * television's, up to its loudest.
  */
-private class Volume(private val audio: AudioManager, private val player: Player) {
+private class Volume(private val audio: AudioManager, private val player: Player, private val cast: CastVideo) {
     private val stream = AudioManager.STREAM_MUSIC
     private val min = audio.getStreamMinVolume(stream)
     private val max = audio.getStreamMaxVolume(stream)
+    private val casting get() = cast.device != null
 
-    /** Whether the volume can't be set here, as on some devices with a fixed one. */
-    val fixed: Boolean get() = max <= min || audio.isVolumeFixed
+    /** Why the volume can't be set from here, if it can't: a fixed one, or a television that won't say its own. */
+    val fixed: String?
+        get() = when {
+            casting -> if (cast.volume.isFinite()) null else "这台电视的音量不能在手机上调"
+            max <= min || audio.isVolumeFixed -> "这台设备的音量不能调"
+            else -> null
+        }
+
+    /** The loudest a swipe goes: past the system's only here. */
+    val most: Float get() = if (casting) 1f else Player.BOOST_LIMIT
 
     private val system: Float get() = (audio.getStreamVolume(stream) - min).toFloat() / (max - min)
 
-    /** The volume now, from 0 to [Player.BOOST_LIMIT]. */
+    /** The volume now, from 0 to [most]. */
     fun level(): Float {
+        if (casting) return cast.volume
         if (player.boost > 1f && system < 1f) player.chooseBoost(1f) // turned down meanwhile
         return if (player.boost > 1f) player.boost else system
     }
 
     fun set(v: Float) {
+        if (casting) return cast.chooseVolume(v)
         val to = (min + v.coerceAtMost(1f) * (max - min)).roundToInt().coerceIn(min, max)
         if (to != audio.getStreamVolume(stream)) runCatching { audio.setStreamVolume(stream, to, 0) } // no system panel: the player's says it
         player.chooseBoost(v.coerceAtLeast(1f))
@@ -583,8 +601,8 @@ private class PlayerHud {
     }
 }
 
-/** A level a swipe at the side of the video sets: the brightness from 0 to 1, or the volume from 0 to [Player.BOOST_LIMIT]. */
-private data class Level(val volume: Boolean, val value: Float)
+/** A level a swipe at the side of the video sets: the brightness from 0 to 1, or the volume from 0 to `most`, [Player.BOOST_LIMIT] here. */
+private data class Level(val volume: Boolean, val value: Float, val most: Float = 1f)
 
 /** A word for a moment; each one shows anew, the same words or not. */
 private class Toast(val text: String)
@@ -603,6 +621,7 @@ private fun VideoArea(hud: PlayerHud, brightness: Brightness?, edge: Boolean, ch
     Box(modifier.clipToBounds()) {
         VideoSurface(Modifier.fillMaxSize().offset { IntOffset(0, hud.offset.roundToInt()) })
         if (!chrome) return@Box
+        CastMark()
         // Under the controls and below the top bar's row; it goes with the video as a swipe moves it.
         DanmakuLayer(
             Modifier.fillMaxSize().offset { IntOffset(0, hud.offset.roundToInt()) }
@@ -702,7 +721,7 @@ private fun VideoSurface(modifier: Modifier) {
                 resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                 setShutterBackgroundColor(android.graphics.Color.BLACK)
                 setBackgroundColor(android.graphics.Color.BLACK)
-                player = video.exo
+                player = video.local.exo
             }
         },
         modifier = modifier,
@@ -727,7 +746,8 @@ private fun Gestures(hud: PlayerHud, brightness: Brightness?, modifier: Modifier
     val player = LocalModel.current.player
     val haptic = LocalHapticFeedback.current
     val context = LocalContext.current
-    val volume = remember(context, player) { context.getSystemService(AudioManager::class.java)?.let { Volume(it, player) } }
+    val cast = LocalVideo.current
+    val volume = remember(context, player, cast) { context.getSystemService(AudioManager::class.java)?.let { Volume(it, player, cast) } }
     val scope = rememberCoroutineScope()
     Box(
         modifier.pointerInput(Unit) {
@@ -756,14 +776,14 @@ private fun Gestures(hud: PlayerHud, brightness: Brightness?, modifier: Modifier
                         hud.showChrome()
                     }
                     touch is Touch.Moved && abs(touch.by.y) <= abs(touch.by.x) -> untilUp(down) // sideways: nothing
-                    x < size.width / 3 -> if (brightness != null) adjust(down, hud, haptic, scope, false, brightness::level, brightness::set) else untilUp(down)
+                    x < size.width / 3 -> if (brightness != null) adjust(down, hud, haptic, scope, false, 1f, brightness::level, brightness::set) else untilUp(down)
                     x > size.width * 2 / 3 -> when {
                         volume == null -> untilUp(down)
-                        volume.fixed -> {
-                            hud.say("这台设备的音量不能调")
+                        volume.fixed != null -> {
+                            hud.say(volume.fixed ?: "")
                             untilUp(down)
                         }
-                        else -> adjust(down, hud, haptic, scope, true, volume::level, volume::set)
+                        else -> adjust(down, hud, haptic, scope, true, volume.most, volume::level, volume::set)
                     }
                     else -> swipe(down, player, hud, scope)
                 }
@@ -869,16 +889,16 @@ private suspend fun AwaitPointerEventScope.adjust(
     haptic: HapticFeedback,
     scope: CoroutineScope,
     volume: Boolean,
+    most: Float,
     get: () -> Float,
     set: (Float) -> Unit,
 ) {
     val span = maxOf(size.height * 0.7f, 240.dp.toPx())
-    val most = if (volume) Player.BOOST_LIMIT else 1f
     val from = get()
     hud.levelJob?.cancel()
     hud.toast = null
     hud.adjusting = true
-    hud.level = Level(volume, from)
+    hud.level = Level(volume, from, most)
     try {
         while (true) {
             val c = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
@@ -888,7 +908,7 @@ private suspend fun AwaitPointerEventScope.adjust(
             val was = hud.level?.value ?: from
             if (volume && (was > 1.001f) != (v > 1.001f)) haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             set(v)
-            hud.level = Level(volume, v)
+            hud.level = Level(volume, v, most)
         }
     } finally {
         hud.adjusting = false
@@ -919,7 +939,7 @@ private val danmakuStyle = TextStyle(color = Color.White.copy(alpha = 0.7f), fon
 private fun DanmakuLayer(modifier: Modifier) {
     val player = LocalModel.current.player
     val comments = player.danmaku
-    if (comments.isEmpty() || !(player.state == PlayerState.Playing || player.state == PlayerState.Buffering)) return
+    if (comments.isEmpty() || !(player.state == PlayerState.Playing || player.state == PlayerState.Buffering) || LocalVideo.current.device != null) return
     val video = player.video
     val moving = player.state == PlayerState.Playing && !player.paused
     var now by remember { mutableLongStateOf(-1L) } // ms into the episode; -1 without one
@@ -957,10 +977,101 @@ private fun DanmakuLayer(modifier: Modifier) {
     )
 }
 
+/**
+ * CastMark covers the video while it plays on a television: what it plays
+ * on. Taps and swipes go through it, as on the video.
+ */
+@Composable
+private fun CastMark() {
+    val d = LocalVideo.current.device ?: return
+    val player = LocalModel.current.player
+    Column(
+        Modifier.fillMaxSize().background(Color.Black),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(Icons.Filled.Tv, contentDescription = null, tint = Color.White, modifier = Modifier.size(48.dp))
+        Spacer(Modifier.height(12.dp))
+        Text(if (player.paused) "投屏已暂停" else "正在投屏", color = Color.White, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(4.dp))
+        Text(d.name, color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 32.dp))
+    }
+}
+
+/**
+ * CastButton picks where the episode plays: here, or on a television on
+ * the same Wi-Fi that takes DLNA, which fetches it from the app itself.
+ * Opening it looks for televisions.
+ */
+@Composable
+private fun CastButton(hud: PlayerHud) {
+    val cast = LocalVideo.current
+    var open by remember { mutableStateOf(false) }
+    HoldsChrome(hud, open)
+    val casting = cast.device
+    Box {
+        IconButton(onClick = {
+            open = true
+            cast.search()
+        }) {
+            Icon(
+                if (casting != null) Icons.Filled.CastConnected else Icons.Filled.Cast,
+                contentDescription = if (casting != null) "正在投屏" else "投屏",
+                tint = if (casting != null) MaterialTheme.colorScheme.primary else Color.White,
+            )
+        }
+        // Rows only ever come in below the ones there, so none moves from under a finger.
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }, modifier = Modifier.widthIn(min = 240.dp, max = 320.dp)) {
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("投屏到电视", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                if (cast.searching) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            }
+            if (casting != null) {
+                DropdownMenuItem(
+                    text = { Text("停止投屏，在手机上看") },
+                    leadingIcon = { Icon(Icons.Filled.PhoneAndroid, contentDescription = null) },
+                    onClick = {
+                        open = false
+                        cast.stopCasting()
+                        hud.poke()
+                    },
+                )
+                HorizontalDivider()
+            }
+            for (d in cast.devices) {
+                DropdownMenuItem(
+                    text = { Text(d.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    leadingIcon = { Icon(Icons.Filled.Tv, contentDescription = null) },
+                    trailingIcon = { if (d == casting) Icon(Icons.Filled.Check, contentDescription = null) },
+                    onClick = {
+                        open = false
+                        cast.cast(d)
+                        hud.poke()
+                    },
+                )
+            }
+            if (cast.devices.isEmpty()) {
+                Text(
+                    if (cast.searching) {
+                        "正在查找同一个 Wi-Fi 里的电视…"
+                    } else {
+                        "没有找到电视。手机和电视要连同一个 Wi-Fi，电视要支持 DLNA 投屏（多数智能电视、盒子和投影仪都支持）"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+                if (!cast.searching) DropdownMenuItem(text = { Text("再找一次") }, onClick = { cast.search() })
+            }
+        }
+    }
+}
+
 /** PauseMark says the video is paused; a tap anywhere on it plays on. */
 @Composable
 private fun PauseMark(modifier: Modifier) {
     val player = LocalModel.current.player
+    if (LocalVideo.current.device != null) return // the cast mark says so
     if (player.paused && (player.state == PlayerState.Playing || player.state == PlayerState.Buffering)) {
         Icon(Icons.Filled.PlayArrow, contentDescription = "已暂停", tint = Color.White.copy(alpha = 0.85f), modifier = modifier.size(76.dp))
     }
@@ -1031,6 +1142,8 @@ private fun TopBar(hud: PlayerHud, rotation: Rotation?, landscape: Boolean, sear
                 }
             }
             SpeedMenu(hud, Modifier.focusRequester(speed))
+            // On a TV itself there is nothing to cast to.
+            if (!isTv()) CastButton(hud)
             if (rotation != null) RotateButton(hud, rotation, landscape)
             IconButton(onClick = search) { Icon(Icons.Filled.Search, contentDescription = "搜索", tint = Color.White) }
             MoreMenu(hud)
@@ -1341,7 +1454,7 @@ private fun SpeedHint(hud: PlayerHud) {
  */
 @Composable
 private fun LevelHint(level: Level) {
-    val most = if (level.volume) Player.BOOST_LIMIT else 1f
+    val most = level.most
     val over = level.value > 1.001f
     val v = level.value
     val icon = when {

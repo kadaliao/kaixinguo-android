@@ -136,6 +136,26 @@ class PreloadTest {
         assertEquals(4L shl 20, preloadBytes(Stream()))
     }
 
+    /** Cast to a television, leaving the app leaves the episode playing there. */
+    @Test
+    fun leavingTheAppWhileCast() = runTest {
+        val catalog = FakeCatalog()
+        val video = FakeVideo()
+        val model = testModel(backgroundScope, catalog, video)
+        catalog.playable("1", 2)
+        val p = model.player
+        p.play("1", 1)
+        playFor(video, 1)
+        video.remote = true
+        p.leaveApp()
+        assertTrue(video.wantsToPlay)
+        assertTrue(!p.away)
+        video.remote = false
+        p.leaveApp()
+        assertTrue(!video.wantsToPlay)
+        assertTrue(p.away)
+    }
+
     /** The volume past the system's loudest goes to the video, within 1 and 1.5. */
     @Test
     fun boostStaysInBounds() = runTest {
