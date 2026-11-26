@@ -86,6 +86,8 @@ import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.CastConnected
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -225,6 +227,10 @@ fun PlayerScreen(inPip: Boolean) {
     val config = LocalConfiguration.current
     val landscape = config.orientation == Configuration.ORIENTATION_LANDSCAPE && config.screenHeightDp < 500 // a phone on its side: the video alone
     val panel = !landscape && config.screenWidthDp >= 600
+    // On a tablet the episodes beside the video can be put away, for the video to have the whole screen; a TV keeps them, for its remote.
+    val tv = isTv()
+    var fullScreen by remember { mutableStateOf(false) }
+    val sidePanel = panel && !(fullScreen && !tv)
     var showEpisodes by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
     var resumeAfterSearch by remember { mutableStateOf(false) }
@@ -249,7 +255,6 @@ fun PlayerScreen(inPip: Boolean) {
     }
 
     // The video itself takes the keys; on a TV the remote also visits the bar over it and the episodes beside it.
-    val tv = isTv()
     val keys = remember { FocusRequester() }
     val episodes = remember { FocusRequester() }
     var videoFocused by remember { mutableStateOf(false) }
@@ -284,12 +289,16 @@ fun PlayerScreen(inPip: Boolean) {
                 // surface, as the device turns or picture in picture starts.
                 Row(Modifier.fillMaxSize()) {
                     Column(Modifier.weight(1f).fillMaxHeight()) {
-                        VideoArea(hud, brightness, edge = landscape || panel, chrome = !inPip, rotation = rotation.takeUnless { tv }, landscape = landscape, search = ::openSearch, video = keys, modifier = Modifier.weight(1f).fillMaxWidth())
+                        VideoArea(
+                            hud, brightness, edge = landscape || panel, chrome = !inPip, rotation = rotation.takeUnless { tv }, landscape = landscape,
+                            fullScreen = fullScreen.takeIf { panel && !tv }, toggleFullScreen = { fullScreen = !fullScreen },
+                            search = ::openSearch, video = keys, modifier = Modifier.weight(1f).fillMaxWidth(),
+                        )
                         if (!inPip && !landscape && !panel) {
                             Chrome(hud, tapToShow = true) { EpisodeBar { showEpisodes = true } }
                         }
                     }
-                    if (!inPip && panel) {
+                    if (!inPip && sidePanel) {
                         EpisodePanel(
                             Modifier.width(320.dp).fillMaxHeight().background(Color(0xFF171717))
                                 .windowInsetsPadding(systemBars().only(WindowInsetsSides.Vertical + WindowInsetsSides.End)),
@@ -615,9 +624,23 @@ private val shadowed = TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.4f),
  * failure shows. The video goes up under the status bar; `edge` says it
  * goes down to the bottom of the screen too, with no episode bar below.
  * `video` takes a remote's focus back down to the video from the top bar.
+ * `fullScreen` is whether the episodes beside the video are put away, on
+ * a tablet; null where there are none beside it to put away.
  */
 @Composable
-private fun VideoArea(hud: PlayerHud, brightness: Brightness?, edge: Boolean, chrome: Boolean, rotation: Rotation?, landscape: Boolean, search: () -> Unit, video: FocusRequester, modifier: Modifier) {
+private fun VideoArea(
+    hud: PlayerHud,
+    brightness: Brightness?,
+    edge: Boolean,
+    chrome: Boolean,
+    rotation: Rotation?,
+    landscape: Boolean,
+    fullScreen: Boolean?,
+    toggleFullScreen: () -> Unit,
+    search: () -> Unit,
+    video: FocusRequester,
+    modifier: Modifier,
+) {
     Box(modifier.clipToBounds()) {
         VideoSurface(Modifier.fillMaxSize().offset { IntOffset(0, hud.offset.roundToInt()) })
         if (!chrome) return@Box
@@ -632,7 +655,7 @@ private fun VideoArea(hud: PlayerHud, brightness: Brightness?, edge: Boolean, ch
         PauseMark(Modifier.align(Alignment.Center))
         PlayerOverlay()
         Column(Modifier.fillMaxSize()) {
-            Chrome(hud) { TopBar(hud, rotation, landscape, search, video) }
+            Chrome(hud) { TopBar(hud, rotation, landscape, fullScreen, toggleFullScreen, search, video) }
             SpeedHint(hud)
             Spacer(Modifier.weight(1f))
             // With nothing under the video, the bar keeps clear of the system's.
@@ -1109,12 +1132,13 @@ private fun PlayerOverlay() {
 
 /**
  * TopBar is what plays, and how fast, over the top of the video, with the
- * way out, to turn the screen, to search and to more. A remote comes into
+ * way out, to turn the screen, to put away the episodes beside it and get
+ * them back, to search and to more. A remote comes into
  * it at the speed, as [PlayerHud.toBar] asks, and goes down from it to the
  * video; while it is in the bar, the bar stays.
  */
 @Composable
-private fun TopBar(hud: PlayerHud, rotation: Rotation?, landscape: Boolean, search: () -> Unit, video: FocusRequester) {
+private fun TopBar(hud: PlayerHud, rotation: Rotation?, landscape: Boolean, fullScreen: Boolean?, toggleFullScreen: () -> Unit, search: () -> Unit, video: FocusRequester) {
     val player = LocalModel.current.player
     val speed = remember { FocusRequester() }
     // Here, not where the key is pressed: the bar may only now be back.
@@ -1145,6 +1169,18 @@ private fun TopBar(hud: PlayerHud, rotation: Rotation?, landscape: Boolean, sear
             // On a TV itself there is nothing to cast to.
             if (!isTv()) CastButton(hud)
             if (rotation != null) RotateButton(hud, rotation, landscape)
+            if (fullScreen != null) {
+                IconButton(onClick = {
+                    toggleFullScreen()
+                    hud.poke()
+                }) {
+                    Icon(
+                        if (fullScreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                        contentDescription = if (fullScreen) "显示选集" else "全屏观看",
+                        tint = Color.White,
+                    )
+                }
+            }
             IconButton(onClick = search) { Icon(Icons.Filled.Search, contentDescription = "搜索", tint = Color.White) }
             MoreMenu(hud)
         }
