@@ -214,6 +214,70 @@ class CatalogTest {
         assertTrue(AppModel.search(catalog, "无", "").cards.isEmpty())
     }
 
+    /**
+     * Searching again for what found nothing asks the server again, since the
+     * server may only have been out of sorts; what found series is kept.
+     */
+    @Test
+    fun searchAgainAfterNothing() = runTest {
+        val catalog = FakeCatalog()
+        var found = false
+        catalog.search = { _, _ ->
+            if (!found) throw OpenhongguoException(ErrorCode.ANONYMOUS_LIMITED, "")
+            Page(items = listOf(SeriesSummary(id = "1", title = "向北", coverUrl = "https://c/1.heic")))
+        }
+        val model = testModel(backgroundScope, catalog)
+        model.searchAgain("向北") // nothing kept yet: nothing to do
+        assertTrue(catalog.calls.isEmpty())
+        val f = model.searchFeed("向北")
+        f.loadMore()
+        runCurrent()
+        assertTrue(f.cards.isEmpty())
+        assertFalse(f.wantsMore)
+        assertNull(f.error)
+
+        found = true
+        model.searchAgain(" 向北 ")
+        runCurrent()
+        assertEquals(listOf("1"), f.cards.map { it.id })
+        assertEquals(2, catalog.calls.size)
+
+        model.searchAgain("向北")
+        runCurrent()
+        assertEquals(2, catalog.calls.size)
+    }
+
+    /** Searching again after a search failed and gave up retrying asks the server again, now. */
+    @Test
+    fun searchAgainAfterFailure() = runTest {
+        val catalog = FakeCatalog()
+        var down = true
+        catalog.search = { _, _ ->
+            if (down) throw IOException("timed out")
+            Page(items = listOf(SeriesSummary(id = "1", title = "向北", coverUrl = "https://c/1.heic")))
+        }
+        val model = testModel(backgroundScope, catalog)
+        val f = model.searchFeed("向北")
+        f.loadMore()
+        runCurrent()
+        assertTrue(f.retrying)
+        val calls = catalog.calls.size
+        model.searchAgain("向北") // a retry is on its way by itself
+        runCurrent()
+        assertEquals(calls, catalog.calls.size)
+
+        advanceTimeBy(31_000) // 2 + 4 + 8 + 16 seconds of retries
+        runCurrent()
+        assertFalse(f.retrying)
+        assertNotNull(f.error)
+
+        down = false
+        model.searchAgain("向北")
+        runCurrent()
+        assertEquals(listOf("1"), f.cards.map { it.id })
+        assertNull(f.error)
+    }
+
     /** Suggestions show their text, not the series ID a suggestion that leads straight to a series carries as its keyword. */
     @Test
     fun suggestionsAreText() = runTest {

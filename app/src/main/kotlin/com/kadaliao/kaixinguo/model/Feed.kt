@@ -136,6 +136,21 @@ class Feed(
     }
 
     /**
+     * Fetches the first page again when the feed came to nothing: it found
+     * nothing, or it failed and gave up retrying. A search submitted once
+     * more asks the server again instead of showing what it kept, since the
+     * server may only have been out of sorts the first time.
+     */
+    fun again() {
+        if (fetch == null || !started || loading || retrying || cards.isNotEmpty()) return
+        cursor = ""
+        more = true
+        error = null
+        tries = 0
+        loadMore()
+    }
+
+    /**
      * Fetches the first page again, as the viewer pulls the grid down.
      * Merging keeps the cards there are after the fresh ones; else the
      * fresh page replaces them.

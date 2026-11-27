@@ -159,6 +159,7 @@ fun SearchScreen() {
     }
     fun submit(s: String) {
         router.search(s)
+        model.searchAgain(s)
         suggestions = emptyList()
         focusManager.clearFocus()
     }
