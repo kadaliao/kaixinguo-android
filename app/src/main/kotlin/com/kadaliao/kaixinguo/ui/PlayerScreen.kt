@@ -136,6 +136,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameMillis
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -226,10 +227,10 @@ fun PlayerScreen(inPip: Boolean) {
     val config = LocalConfiguration.current
     val landscape = config.orientation == Configuration.ORIENTATION_LANDSCAPE && config.screenHeightDp < 500 // a phone on its side: the video alone
     val panel = !landscape && config.screenWidthDp >= 600
-    // On a tablet the episodes beside the video can be put away, for the video to have the whole screen; a TV keeps them, for its remote.
+    // On a tablet or a TV the episodes beside the video can be put away, for the video to have the whole screen.
     val tv = isTv()
     var fullScreen by remember { mutableStateOf(false) }
-    val sidePanel = panel && !(fullScreen && !tv)
+    val sidePanel = panel && !fullScreen
     var showEpisodes by remember { mutableStateOf(false) }
     var searching by remember { mutableStateOf(false) }
     var resumeAfterSearch by remember { mutableStateOf(false) }
@@ -258,6 +259,27 @@ fun PlayerScreen(inPip: Boolean) {
     val episodes = remember { FocusRequester() }
     var videoFocused by remember { mutableStateOf(false) }
 
+    // Down from the video goes to the episode playing. With the episodes put
+    // away, it brings them back first; their grid lays that episode out a
+    // frame or two later, so the focus goes there once it can.
+    var toEpisodes by remember { mutableStateOf(false) }
+    fun downToEpisodes() {
+        if (sidePanel) {
+            runCatching { episodes.requestFocus() }
+        } else if (panel) {
+            fullScreen = false
+            toEpisodes = true
+        }
+    }
+    LaunchedEffect(toEpisodes, sidePanel) {
+        if (!toEpisodes || !sidePanel) return@LaunchedEffect
+        for (i in 0 until 10) {
+            if (runCatching { episodes.requestFocus() }.getOrDefault(false)) break
+            withFrameNanos {}
+        }
+        toEpisodes = false
+    }
+
     // Back closes the search, then on a TV brings the remote back to the video, then leaves.
     fun back() {
         if (searching) return closeSearch(null)
@@ -283,7 +305,7 @@ fun PlayerScreen(inPip: Boolean) {
                     .focusRequester(keys).onFocusChanged { videoFocused = it.isFocused }.focusable()
                     .onPreviewKeyEvent { e ->
                         !searching && e.type == KeyEventType.KeyDown &&
-                            (if (tv) videoFocused && remoteKey(player, hud, e, episodes) else playerKey(player, e.key)).also { if (it) hud.poke() }
+                            (if (tv) videoFocused && remoteKey(player, hud, e, ::downToEpisodes) else playerKey(player, e.key)).also { if (it) hud.poke() }
                     },
             ) {
                 // One layout for all, so the video keeps its place, and its
@@ -292,7 +314,7 @@ fun PlayerScreen(inPip: Boolean) {
                     Column(Modifier.weight(1f).fillMaxHeight()) {
                         VideoArea(
                             hud, brightness, edge = landscape || panel, chrome = !inPip, rotation = rotation.takeUnless { tv }, landscape = landscape,
-                            fullScreen = fullScreen.takeIf { panel && !tv }, toggleFullScreen = { fullScreen = !fullScreen },
+                            fullScreen = fullScreen.takeIf { panel }, toggleFullScreen = { fullScreen = !fullScreen },
                             search = ::openSearch, video = keys, modifier = Modifier.weight(1f).fillMaxWidth(),
                         )
                         if (!inPip && !landscape && !panel) {
@@ -342,9 +364,10 @@ private fun playerKey(player: Player, key: Key): Boolean {
 /**
  * The keys of a TV's remote while the video has the focus: OK pauses, left
  * and right go back and on 10 seconds, up goes to the bar over the video,
- * and down to the episodes beside it, where the arrows move between them.
+ * and down to the episodes beside it, where the arrows move between them;
+ * put away, `down` brings them back.
  */
-private fun remoteKey(player: Player, hud: PlayerHud, e: KeyEvent, episodes: FocusRequester): Boolean {
+private fun remoteKey(player: Player, hud: PlayerHud, e: KeyEvent, down: () -> Unit): Boolean {
     when (e.key) {
         // Once a press: held, the remote repeats it.
         Key.DirectionCenter, Key.Enter, Key.NumPadEnter, Key.Spacebar -> if (e.nativeKeyEvent.repeatCount == 0) player.ok()
@@ -352,7 +375,7 @@ private fun remoteKey(player: Player, hud: PlayerHud, e: KeyEvent, episodes: Foc
         Key.DirectionRight -> player.skip(10.0)
         // The bar may have faded away: the key brings it back, and it takes the focus as it shows.
         Key.DirectionUp -> hud.toBar = true
-        Key.DirectionDown -> runCatching { episodes.requestFocus() }
+        Key.DirectionDown -> down()
         else -> return false
     }
     return true
@@ -633,7 +656,7 @@ private val shadowed = TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.4f),
  * goes down to the bottom of the screen too, with no episode bar below.
  * `video` takes a remote's focus back down to the video from the top bar.
  * `fullScreen` is whether the episodes beside the video are put away, on
- * a tablet; null where there are none beside it to put away.
+ * a tablet or a TV; null where there are none beside it to put away.
  */
 @Composable
 private fun VideoArea(
@@ -1169,7 +1192,7 @@ private fun TopBar(hud: PlayerHud, rotation: Rotation?, landscape: Boolean, full
                 .padding(start = 4.dp, end = 4.dp, bottom = 20.dp).height(48.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = player::leave) {
+            IconButton(onClick = player::leave, Modifier.focusRing(Color.White, CircleShape)) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBackIos, contentDescription = "退出播放", tint = Color.White)
             }
             Column(Modifier.weight(1f)) {
@@ -1189,7 +1212,7 @@ private fun TopBar(hud: PlayerHud, rotation: Rotation?, landscape: Boolean, full
                 IconButton(onClick = {
                     toggleFullScreen()
                     hud.poke()
-                }) {
+                }, Modifier.focusRing(Color.White, CircleShape)) {
                     Icon(
                         if (fullScreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
                         contentDescription = if (fullScreen) "显示选集" else "全屏观看",
@@ -1197,7 +1220,7 @@ private fun TopBar(hud: PlayerHud, rotation: Rotation?, landscape: Boolean, full
                     )
                 }
             }
-            if (!crowded) IconButton(onClick = search) { Icon(Icons.Filled.Search, contentDescription = "搜索", tint = Color.White) }
+            if (!crowded) IconButton(onClick = search, Modifier.focusRing(Color.White, CircleShape)) { Icon(Icons.Filled.Search, contentDescription = "搜索", tint = Color.White) }
             MoreMenu(hud, search.takeIf { crowded })
         }
     }
@@ -1244,10 +1267,10 @@ private fun SpeedMenu(hud: PlayerHud, modifier: Modifier = Modifier) {
     HoldsChrome(hud, open)
     Box {
         Row(
-            modifier.clip(CircleShape).clickable { open = true }.height(44.dp).padding(horizontal = 8.dp),
+            modifier.focusRing(Color.White, CircleShape).clip(CircleShape).clickable { open = true }.height(44.dp).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Filled.Speed, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+            Icon(Icons.Filled.Speed, contentDescription = null, tint = Color.White, modifier = Modifier.size(if (isTv()) 24.dp else 20.dp))
             Spacer(Modifier.width(4.dp))
             Text(if (player.speed == 1f) "倍速" else "${rateText(player.speed)}x", color = Color.White, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
         }
@@ -1295,7 +1318,7 @@ private fun MoreMenu(hud: PlayerHud, search: (() -> Unit)?) {
         IconButton(onClick = {
             page = More.MAIN
             open = true
-        }) { Icon(Icons.Filled.MoreHoriz, contentDescription = "更多", tint = Color.White) }
+        }, Modifier.focusRing(Color.White, CircleShape)) { Icon(Icons.Filled.MoreHoriz, contentDescription = "更多", tint = Color.White) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             when (page) {
                 More.MAIN -> {
@@ -1643,11 +1666,11 @@ private fun EpisodePanel(modifier: Modifier = Modifier, steps: Boolean = false, 
             Text(episodeLine(player), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (steps) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedButton(onClick = { player.step(-1) }, enabled = player.hasPrevious, contentPadding = PaddingValues(horizontal = 12.dp)) {
+                    OutlinedButton(onClick = { player.step(-1) }, Modifier.focusRing(Color.White, CircleShape), enabled = player.hasPrevious, contentPadding = PaddingValues(horizontal = 12.dp)) {
                         Icon(Icons.Filled.SkipPrevious, contentDescription = null, modifier = Modifier.size(18.dp))
                         Text("上一集")
                     }
-                    OutlinedButton(onClick = { player.step(1) }, enabled = player.hasNext, contentPadding = PaddingValues(horizontal = 12.dp)) {
+                    OutlinedButton(onClick = { player.step(1) }, Modifier.focusRing(Color.White, CircleShape), enabled = player.hasNext, contentPadding = PaddingValues(horizontal = 12.dp)) {
                         Icon(Icons.Filled.SkipNext, contentDescription = null, modifier = Modifier.size(18.dp))
                         Text("下一集")
                     }

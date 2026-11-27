@@ -84,6 +84,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -115,6 +117,19 @@ fun isWide(): Boolean = LocalConfiguration.current.screenWidthDp >= 600
 @Composable
 fun isTv(): Boolean =
     (LocalConfiguration.current.uiMode and Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION
+
+/**
+ * Rings what has a TV remote's focus in `color`, with a dark edge outside
+ * it, so it shows from across the room over a bright picture as well as a
+ * dark one. Away from a TV it adds nothing.
+ */
+@Composable
+fun Modifier.focusRing(color: Color, shape: Shape): Modifier {
+    if (!isTv()) return this
+    var focused by remember { mutableStateOf(false) }
+    return onFocusChanged { focused = it.hasFocus }
+        .then(if (focused) Modifier.border(3.dp, color, shape).border(1.dp, Color.Black.copy(alpha = 0.5f), shape) else Modifier)
+}
 
 /**
  * The card a page's remote focus rested on last, kept with the page's
@@ -225,10 +240,16 @@ fun FeedGrid(
     }
 }
 
-/** Refreshable lets the viewer pull its content down to call `refresh`, when there is one. */
+/**
+ * Refreshable lets the viewer pull its content down to call `refresh`, when
+ * there is one. A TV has no finger to pull with, and the grid scrolling under
+ * a remote's focus can tug the indicator partway out, to hang there with no
+ * finger to let it go: there the content is left as it is, and a page that
+ * refreshes has a button for it.
+ */
 @Composable
 fun Refreshable(refresh: (suspend () -> Unit)?, content: @Composable BoxScope.() -> Unit) {
-    if (refresh == null) {
+    if (refresh == null || isTv()) {
         Box(Modifier.fillMaxSize(), content = content)
         return
     }

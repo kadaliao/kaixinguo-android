@@ -5,6 +5,7 @@ package com.kadaliao.kaixinguo.ui
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
@@ -27,9 +29,11 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.RemoveCircleOutline
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.StarOutline
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -50,6 +54,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalFocusManager
@@ -58,18 +66,49 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kadaliao.kaixinguo.model.Card
+import com.kadaliao.kaixinguo.model.Feed
 import com.kadaliao.kaixinguo.model.Watch
 import com.kadaliao.kaixinguo.model.dayLabel
 import com.kadaliao.kaixinguo.model.friendly
 import com.kadaliao.kaixinguo.model.todayKey
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** DiscoverScreen is the recommended series. */
 @Composable
 fun DiscoverScreen() {
     val model = LocalModel.current
-    Page("推荐") {
-        FeedGrid(model.home, "暂时没有推荐", refresh = { model.home.refresh(merging = true) })
+    // A TV's remote can't pull the grid down: it refreshes from the bar instead.
+    // The button sits at the bar's far end, which up from the posters on the
+    // left would miss for the rail beside them: up out of the grid, from any
+    // of its top row, goes to the button.
+    val tv = isTv()
+    val refreshButton = remember { FocusRequester() }
+    val upToRefresh = if (!tv) Modifier else Modifier.focusProperties {
+        onExit = { if (requestedFocusDirection == FocusDirection.Up) runCatching { refreshButton.requestFocus() } }
+    }.focusGroup()
+    Page("推荐", actions = { if (tv) RefreshButton(model.home, Modifier.focusRequester(refreshButton)) { model.home.refresh(merging = true) } }) {
+        Box(upToRefresh.fillMaxSize()) {
+            FeedGrid(model.home, "暂时没有推荐", refresh = { model.home.refresh(merging = true) })
+        }
+    }
+}
+
+/**
+ * RefreshButton fetches a feed's first page again, for a remote that can't
+ * pull its grid down. It turns into a spinner while the feed loads, and stays
+ * there to be pressed, so the focus doesn't jump away from it. With the
+ * focus it is ringed, as the player's buttons are.
+ */
+@Composable
+private fun RefreshButton(feed: Feed, modifier: Modifier = Modifier, refresh: suspend () -> Unit) {
+    val model = LocalModel.current
+    IconButton(onClick = { if (!feed.loading) model.scope.launch { refresh() } }, modifier.focusRing(MaterialTheme.colorScheme.onSurface, CircleShape)) {
+        if (feed.loading) {
+            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        } else {
+            Icon(Icons.Filled.Refresh, contentDescription = "刷新")
+        }
     }
 }
 
