@@ -1740,6 +1740,7 @@ private fun PlayerSearch(close: (Card?) -> Unit) {
         if (q.isEmpty()) return
         text = q
         query = q
+        model.searchAgain(q)
         suggestions = emptyList()
         focusManager.clearFocus()
     }

@@ -270,6 +270,14 @@ class AppModel(
     }
 
     /**
+     * Searches for query again, as the viewer submits it, when what was kept
+     * for it is nothing or a failure: those aren't worth keeping.
+     */
+    fun searchAgain(query: String) {
+        feeds["search:${query.trim()}"]?.again()
+    }
+
+    /**
      * Words people complete the prefix to, as they type a search. They are
      * the suggestions' text: a suggestion that leads straight to a series
      * has its ID for a keyword, and not every such ID is a series the app
