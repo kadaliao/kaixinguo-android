@@ -377,17 +377,20 @@ fun EpisodeChip(episode: Episode, current: Boolean, watched: Boolean, modifier: 
         watched -> c.onSurfaceVariant
         else -> c.onSurface
     }
+    // On a TV the fill says which one plays, and a ring which one the remote is on: bigger, to be read from the sofa.
+    val tv = isTv()
     Box(
         modifier
             .alpha(if (episode.playable) 1f else 0.45f)
-            .height(40.dp)
+            .height(if (tv) 48.dp else 40.dp)
+            .focusRing(c.onSurface, MaterialTheme.shapes.small)
             .clip(MaterialTheme.shapes.small)
             .background(if (current) c.primary else c.onSurface.copy(alpha = 0.07f))
             .clickable(enabled = episode.playable, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         if (episode.playable) {
-            Text("${episode.number}", color = fg, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text("${episode.number}", color = fg, style = if (tv) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
         } else {
             Icon(Icons.Filled.Lock, contentDescription = "需要登录", tint = fg, modifier = Modifier.size(14.dp))
         }

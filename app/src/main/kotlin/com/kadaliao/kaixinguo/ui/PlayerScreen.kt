@@ -1169,7 +1169,7 @@ private fun TopBar(hud: PlayerHud, rotation: Rotation?, landscape: Boolean, full
                 .padding(start = 4.dp, end = 4.dp, bottom = 20.dp).height(48.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = player::leave) {
+            IconButton(onClick = player::leave, Modifier.focusRing(Color.White, CircleShape)) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBackIos, contentDescription = "退出播放", tint = Color.White)
             }
             Column(Modifier.weight(1f)) {
@@ -1189,7 +1189,7 @@ private fun TopBar(hud: PlayerHud, rotation: Rotation?, landscape: Boolean, full
                 IconButton(onClick = {
                     toggleFullScreen()
                     hud.poke()
-                }) {
+                }, Modifier.focusRing(Color.White, CircleShape)) {
                     Icon(
                         if (fullScreen) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
                         contentDescription = if (fullScreen) "显示选集" else "全屏观看",
@@ -1197,7 +1197,7 @@ private fun TopBar(hud: PlayerHud, rotation: Rotation?, landscape: Boolean, full
                     )
                 }
             }
-            if (!crowded) IconButton(onClick = search) { Icon(Icons.Filled.Search, contentDescription = "搜索", tint = Color.White) }
+            if (!crowded) IconButton(onClick = search, Modifier.focusRing(Color.White, CircleShape)) { Icon(Icons.Filled.Search, contentDescription = "搜索", tint = Color.White) }
             MoreMenu(hud, search.takeIf { crowded })
         }
     }
@@ -1244,10 +1244,10 @@ private fun SpeedMenu(hud: PlayerHud, modifier: Modifier = Modifier) {
     HoldsChrome(hud, open)
     Box {
         Row(
-            modifier.clip(CircleShape).clickable { open = true }.height(44.dp).padding(horizontal = 8.dp),
+            modifier.focusRing(Color.White, CircleShape).clip(CircleShape).clickable { open = true }.height(44.dp).padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Filled.Speed, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+            Icon(Icons.Filled.Speed, contentDescription = null, tint = Color.White, modifier = Modifier.size(if (isTv()) 24.dp else 20.dp))
             Spacer(Modifier.width(4.dp))
             Text(if (player.speed == 1f) "倍速" else "${rateText(player.speed)}x", color = Color.White, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
         }
@@ -1295,7 +1295,7 @@ private fun MoreMenu(hud: PlayerHud, search: (() -> Unit)?) {
         IconButton(onClick = {
             page = More.MAIN
             open = true
-        }) { Icon(Icons.Filled.MoreHoriz, contentDescription = "更多", tint = Color.White) }
+        }, Modifier.focusRing(Color.White, CircleShape)) { Icon(Icons.Filled.MoreHoriz, contentDescription = "更多", tint = Color.White) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             when (page) {
                 More.MAIN -> {
@@ -1643,11 +1643,11 @@ private fun EpisodePanel(modifier: Modifier = Modifier, steps: Boolean = false, 
             Text(episodeLine(player), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (steps) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedButton(onClick = { player.step(-1) }, enabled = player.hasPrevious, contentPadding = PaddingValues(horizontal = 12.dp)) {
+                    OutlinedButton(onClick = { player.step(-1) }, Modifier.focusRing(Color.White, CircleShape), enabled = player.hasPrevious, contentPadding = PaddingValues(horizontal = 12.dp)) {
                         Icon(Icons.Filled.SkipPrevious, contentDescription = null, modifier = Modifier.size(18.dp))
                         Text("上一集")
                     }
-                    OutlinedButton(onClick = { player.step(1) }, enabled = player.hasNext, contentPadding = PaddingValues(horizontal = 12.dp)) {
+                    OutlinedButton(onClick = { player.step(1) }, Modifier.focusRing(Color.White, CircleShape), enabled = player.hasNext, contentPadding = PaddingValues(horizontal = 12.dp)) {
                         Icon(Icons.Filled.SkipNext, contentDescription = null, modifier = Modifier.size(18.dp))
                         Text("下一集")
                     }
