@@ -92,6 +92,7 @@ import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.PlayArrow
@@ -235,6 +236,12 @@ fun PlayerScreen(inPip: Boolean) {
     var searching by remember { mutableStateOf(false) }
     var resumeAfterSearch by remember { mutableStateOf(false) }
     val hud = remember { PlayerHud() }
+    // Touches can be locked out while the video fills the screen: a phone on
+    // its side, or a tablet with the episodes put away. The lock lifts as
+    // that ends, in picture in picture, and as the episode fails, for its
+    // buttons to work; a remote or a keyboard is no hand on the screen.
+    val lockable = !tv && !inPip && (landscape || (panel && fullScreen)) && player.state !is PlayerState.Failed
+    LaunchedEffect(lockable) { if (!lockable) hud.locked = false }
     val rotation = rememberRotation()
     val brightness = rememberBrightness()
     // The little window shows at the screen's own brightness.
@@ -290,8 +297,8 @@ fun PlayerScreen(inPip: Boolean) {
     BackHandler(enabled = !inPip, onBack = ::back)
     PlayerWindow(
         // The status bar comes with the controls even on a phone on its side, for the time and the battery; the navigation bar there stays away.
-        hideStatusBar = inPip || !hud.chrome,
-        hideNavigationBar = landscape || inPip || !hud.chrome,
+        hideStatusBar = inPip || !hud.controls,
+        hideNavigationBar = landscape || inPip || !hud.controls,
         // Cast, the phone is only a remote, and may sleep.
         keepOn = LocalVideo.current.device == null && !player.paused && (player.state == PlayerState.Playing || player.state == PlayerState.Buffering),
     )
@@ -314,7 +321,7 @@ fun PlayerScreen(inPip: Boolean) {
                     Column(Modifier.weight(1f).fillMaxHeight()) {
                         VideoArea(
                             hud, brightness, edge = landscape || panel, chrome = !inPip, rotation = rotation.takeUnless { tv }, landscape = landscape,
-                            fullScreen = fullScreen.takeIf { panel }, toggleFullScreen = { fullScreen = !fullScreen },
+                            fullScreen = fullScreen.takeIf { panel }, toggleFullScreen = { fullScreen = !fullScreen }, touchLock = lockable,
                             search = ::openSearch, video = keys, modifier = Modifier.weight(1f).fillMaxWidth(),
                         )
                         if (!inPip && !landscape && !panel) {
@@ -594,8 +601,18 @@ private class Rotation(private val activity: Activity) {
  * the last one did.
  */
 private class PlayerHud {
-    /** Whether the controls over the video show: they fade a while after the last touch as the video plays, and a tap brings them back. */
+    /**
+     * Whether the controls over the video show: they fade a while after the
+     * last touch as the video plays, and a tap brings them back. With the
+     * touch lock on, it is whether the button to unlock shows, alone.
+     */
     var chrome by mutableStateOf(true)
+
+    /** Whether the touch lock is on: the video plays on, and a touch on it only brings back the button to unlock. */
+    var locked by mutableStateOf(false)
+
+    /** Whether the controls show, the system bars with them: not while the touch lock is on. */
+    val controls: Boolean get() = chrome && !locked
 
     /**
      * How many touches on the video and its controls have ended, each
@@ -657,6 +674,8 @@ private val shadowed = TextStyle(shadow = Shadow(Color.Black.copy(alpha = 0.4f),
  * `video` takes a remote's focus back down to the video from the top bar.
  * `fullScreen` is whether the episodes beside the video are put away, on
  * a tablet or a TV; null where there are none beside it to put away.
+ * `touchLock` is whether touches can be locked out, with the video filling
+ * the screen.
  */
 @Composable
 private fun VideoArea(
@@ -668,6 +687,7 @@ private fun VideoArea(
     landscape: Boolean,
     fullScreen: Boolean?,
     toggleFullScreen: () -> Unit,
+    touchLock: Boolean,
     search: () -> Unit,
     video: FocusRequester,
     modifier: Modifier,
@@ -701,20 +721,50 @@ private fun VideoArea(
                 )
             }
         }
+        if (touchLock) {
+            TouchLock(
+                hud,
+                Modifier.align(Alignment.CenterEnd)
+                    .windowInsetsPadding(navigationBars().union(WindowInsets.displayCutout).only(WindowInsetsSides.End))
+                    .padding(end = 12.dp),
+            )
+        }
     }
 }
 
 /**
- * Chrome shows the controls in it, or fades them, as [PlayerHud.chrome]
+ * TouchLock is the button halfway down the right of the video that locks
+ * out touches, so that a hand on the screen neither pauses the video nor
+ * moves it on; and, locked, the one way back, which a tap on the video
+ * brings. It comes and goes with the controls.
+ */
+@Composable
+private fun TouchLock(hud: PlayerHud, modifier: Modifier) {
+    AnimatedVisibility(hud.chrome, modifier, enter = fadeIn(tween(200)), exit = fadeOut(tween(300))) {
+        val locked = hud.locked
+        IconButton(
+            onClick = {
+                hud.locked = !locked
+                hud.poke()
+            },
+            Modifier.clip(CircleShape).background(Color.Black.copy(alpha = 0.4f)),
+        ) {
+            Icon(if (locked) Icons.Filled.Lock else Icons.Filled.LockOpen, contentDescription = if (locked) "解锁触摸" else "锁定触摸", tint = Color.White)
+        }
+    }
+}
+
+/**
+ * Chrome shows the controls in it, or fades them, as [PlayerHud.controls]
  * says, keeping their place so that nothing else moves. Faded, they are
  * gone, and touches where they were go to the video; `tapToShow`, off the
  * video, a tap there brings them back.
  */
 @Composable
 private fun Chrome(hud: PlayerHud, tapToShow: Boolean = false, content: @Composable () -> Unit) {
-    val shown = hud.chrome
+    val shown = hud.controls
     val alpha = animateFloatAsState(if (shown) 1f else 0f, tween(if (shown) 200 else 300), label = "chrome")
-    val gone by remember { derivedStateOf { !hud.chrome && alpha.value == 0f } }
+    val gone by remember { derivedStateOf { !hud.controls && alpha.value == 0f } }
     var height by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
     Box(
@@ -793,7 +843,8 @@ private sealed interface Touch {
  * Gestures reads the fingers on the video: a tap brings back the controls,
  * or with them showing pauses; a swipe up or down moves between episodes in
  * the middle third, and sets the brightness on the left third and the
- * volume on the right; a press and hold plays at double speed.
+ * volume on the right; a press and hold plays at double speed. With the
+ * touch lock on, any of them only brings back the button to unlock.
  */
 @Composable
 private fun Gestures(hud: PlayerHud, brightness: Brightness?, modifier: Modifier) {
@@ -822,6 +873,7 @@ private fun Gestures(hud: PlayerHud, brightness: Brightness?, modifier: Modifier
                 }
                 val x = down.position.x
                 when {
+                    hud.locked -> hud.showChrome() // the gesture's other events go unheard until it ends
                     touch == null -> hold(down, player, hud, haptic)
                     touch == Touch.Up -> if (hud.chrome) {
                         player.togglePause()
