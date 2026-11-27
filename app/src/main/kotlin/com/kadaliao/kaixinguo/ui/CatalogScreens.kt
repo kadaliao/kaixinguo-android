@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
@@ -27,9 +28,11 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.RemoveCircleOutline
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.StarOutline
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -58,18 +61,38 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.kadaliao.kaixinguo.model.Card
+import com.kadaliao.kaixinguo.model.Feed
 import com.kadaliao.kaixinguo.model.Watch
 import com.kadaliao.kaixinguo.model.dayLabel
 import com.kadaliao.kaixinguo.model.friendly
 import com.kadaliao.kaixinguo.model.todayKey
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** DiscoverScreen is the recommended series. */
 @Composable
 fun DiscoverScreen() {
     val model = LocalModel.current
-    Page("推荐") {
+    // A TV's remote can't pull the grid down: it refreshes from the bar instead.
+    Page("推荐", actions = { if (isTv()) RefreshButton(model.home) { model.home.refresh(merging = true) } }) {
         FeedGrid(model.home, "暂时没有推荐", refresh = { model.home.refresh(merging = true) })
+    }
+}
+
+/**
+ * RefreshButton fetches a feed's first page again, for a remote that can't
+ * pull its grid down. It turns into a spinner while the feed loads, and stays
+ * there to be pressed, so the focus doesn't jump away from it.
+ */
+@Composable
+private fun RefreshButton(feed: Feed, refresh: suspend () -> Unit) {
+    val model = LocalModel.current
+    IconButton(onClick = { if (!feed.loading) model.scope.launch { refresh() } }) {
+        if (feed.loading) {
+            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+        } else {
+            Icon(Icons.Filled.Refresh, contentDescription = "刷新")
+        }
     }
 }
 

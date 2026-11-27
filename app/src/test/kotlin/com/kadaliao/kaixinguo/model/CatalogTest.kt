@@ -13,7 +13,9 @@ import dev.openhongguo.SeriesStatus
 import dev.openhongguo.SeriesSummary
 import dev.openhongguo.Stream
 import dev.openhongguo.Suggestion
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -492,6 +494,29 @@ class CatalogTest {
         runCurrent()
         assertEquals("c", f.cards.last().id) // the third page, not the second again
         assertTrue(f.more)
+    }
+
+    /** A TV's refresh button pressed again while a refresh is on its way asks for the first page only once. */
+    @Test
+    fun refreshPressedTwiceFetchesOnce() = runTest {
+        var calls = 0
+        val gate = CompletableDeferred<Unit>()
+        val f = Feed(backgroundScope) { _ ->
+            calls++
+            if (calls > 1) gate.await()
+            FeedPage(listOf(Card("r$calls", "新$calls")), "p2", more = true)
+        }
+        f.loadMore()
+        runCurrent()
+        backgroundScope.launch { f.refresh(merging = true) }
+        backgroundScope.launch { f.refresh(merging = true) }
+        runCurrent()
+        assertEquals(2, calls)
+        assertTrue(f.loading)
+        gate.complete(Unit)
+        runCurrent()
+        assertEquals(listOf("r2", "r1"), f.cards.map { it.id })
+        assertFalse(f.loading)
     }
 }
 

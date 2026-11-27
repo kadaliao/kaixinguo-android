@@ -225,10 +225,16 @@ fun FeedGrid(
     }
 }
 
-/** Refreshable lets the viewer pull its content down to call `refresh`, when there is one. */
+/**
+ * Refreshable lets the viewer pull its content down to call `refresh`, when
+ * there is one. A TV has no finger to pull with, and the grid scrolling under
+ * a remote's focus can tug the indicator partway out, to hang there with no
+ * finger to let it go: there the content is left as it is, and a page that
+ * refreshes has a button for it.
+ */
 @Composable
 fun Refreshable(refresh: (suspend () -> Unit)?, content: @Composable BoxScope.() -> Unit) {
-    if (refresh == null) {
+    if (refresh == null || isTv()) {
         Box(Modifier.fillMaxSize(), content = content)
         return
     }
