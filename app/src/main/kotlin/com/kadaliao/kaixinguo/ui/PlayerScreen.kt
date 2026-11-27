@@ -59,7 +59,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.systemBarsIgnoringVisibility
@@ -268,14 +267,16 @@ fun PlayerScreen(inPip: Boolean) {
 
     BackHandler(enabled = !inPip, onBack = ::back)
     PlayerWindow(
-        hideBars = landscape || inPip || !hud.chrome,
+        // The status bar comes with the controls even on a phone on its side, for the time and the battery; the navigation bar there stays away.
+        hideStatusBar = inPip || !hud.chrome,
+        hideNavigationBar = landscape || inPip || !hud.chrome,
         // Cast, the phone is only a remote, and may sleep.
         keepOn = LocalVideo.current.device == null && !player.paused && (player.state == PlayerState.Playing || player.state == PlayerState.Buffering),
     )
     if (!inPip) ChromeTimer(hud, busy = showEpisodes || searching)
     PlayerTheme {
         LaunchedEffect(searching) { if (!searching) runCatching { keys.requestFocus() } }
-        // Upright, the bars come and go with the controls: laid out as if they showed, nothing moves.
+        // Upright, both bars come and go with the controls, on its side only the status bar: laid out as if they showed, nothing moves.
         CompositionLocalProvider(LocalSteadyBars provides !landscape) {
             Box(
                 Modifier.fillMaxSize().background(Color.Black)
@@ -359,7 +360,7 @@ private fun remoteKey(player: Player, hud: PlayerHud, e: KeyEvent, episodes: Foc
 
 /** PlayerWindow darkens the system bars around the video, hides them when it fills the screen, and keeps the screen on while it plays. */
 @Composable
-private fun PlayerWindow(hideBars: Boolean, keepOn: Boolean) {
+private fun PlayerWindow(hideStatusBar: Boolean, hideNavigationBar: Boolean, keepOn: Boolean) {
     val view = LocalView.current
     val window = LocalActivity.current?.window ?: return
     val controller = remember(window, view) { WindowCompat.getInsetsController(window, view) }
@@ -373,9 +374,12 @@ private fun PlayerWindow(hideBars: Boolean, keepOn: Boolean) {
             controller.isAppearanceLightNavigationBars = lightNav
         }
     }
-    DisposableEffect(hideBars) {
+    DisposableEffect(hideStatusBar, hideNavigationBar) {
         controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        if (hideBars) controller.hide(WindowInsetsCompat.Type.systemBars()) else controller.show(WindowInsetsCompat.Type.systemBars())
+        val status = WindowInsetsCompat.Type.statusBars()
+        val others = WindowInsetsCompat.Type.systemBars() and status.inv() // the navigation bar, and a free window's caption
+        if (hideStatusBar) controller.hide(status) else controller.show(status)
+        if (hideNavigationBar) controller.hide(others) else controller.show(others)
         onDispose { controller.show(WindowInsetsCompat.Type.systemBars()) }
     }
     DisposableEffect(keepOn) {
@@ -384,12 +388,16 @@ private fun PlayerWindow(hideBars: Boolean, keepOn: Boolean) {
     }
 }
 
-/** Whether the player lays itself out as if the system bars showed, so that they come and go with the controls, moving nothing. */
+/**
+ * Whether the player lays itself out as if the system bars showed, so that
+ * they come and go with the controls, moving nothing. The status bar always
+ * does; this is for the navigation bar, which a phone on its side keeps away.
+ */
 private val LocalSteadyBars = compositionLocalOf { false }
 
-/** The status bar's insets, as the player lays itself out. */
+/** The status bar's insets, as the player lays itself out: always as if it showed, as it comes and goes with the controls however the phone is held. */
 @Composable
-private fun statusBars(): WindowInsets = if (LocalSteadyBars.current) WindowInsets.statusBarsIgnoringVisibility else WindowInsets.statusBars
+private fun statusBars(): WindowInsets = WindowInsets.statusBarsIgnoringVisibility
 
 /** The navigation bar's insets, as the player lays itself out. */
 @Composable
@@ -1141,6 +1149,11 @@ private fun PlayerOverlay() {
 private fun TopBar(hud: PlayerHud, rotation: Rotation?, landscape: Boolean, fullScreen: Boolean?, toggleFullScreen: () -> Unit, search: () -> Unit, video: FocusRequester) {
     val player = LocalModel.current.player
     val speed = remember { FocusRequester() }
+    // Where the episode's number would break onto a second line, search
+    // goes into the menu to give it room. It stays there while the bar
+    // shows, so no button moves from under a finger; the bar measures again
+    // as it comes back, or as the screen turns.
+    var crowded by remember(LocalConfiguration.current.screenWidthDp) { mutableStateOf(false) }
     // Here, not where the key is pressed: the bar may only now be back.
     LaunchedEffect(hud.toBar) {
         if (!hud.toBar) return@LaunchedEffect
@@ -1160,7 +1173,10 @@ private fun TopBar(hud: PlayerHud, rotation: Rotation?, landscape: Boolean, full
                 Icon(Icons.AutoMirrored.Filled.ArrowBackIos, contentDescription = "退出播放", tint = Color.White)
             }
             Column(Modifier.weight(1f)) {
-                Text("第 ${player.number} 集", color = Color.White, style = MaterialTheme.typography.titleMedium.merge(shadowed), fontWeight = FontWeight.SemiBold)
+                Text(
+                    "第 ${player.number} 集", color = Color.White, style = MaterialTheme.typography.titleMedium.merge(shadowed), fontWeight = FontWeight.SemiBold,
+                    onTextLayout = { if (it.lineCount > 1) crowded = true },
+                )
                 player.page?.series?.title?.let {
                     Text(it, color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.bodySmall.merge(shadowed), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
@@ -1181,8 +1197,8 @@ private fun TopBar(hud: PlayerHud, rotation: Rotation?, landscape: Boolean, full
                     )
                 }
             }
-            IconButton(onClick = search) { Icon(Icons.Filled.Search, contentDescription = "搜索", tint = Color.White) }
-            MoreMenu(hud)
+            if (!crowded) IconButton(onClick = search) { Icon(Icons.Filled.Search, contentDescription = "搜索", tint = Color.White) }
+            MoreMenu(hud, search.takeIf { crowded })
         }
     }
 }
@@ -1265,10 +1281,10 @@ private enum class More { MAIN, SPEED, QUALITY, SLEEP }
 /**
  * MoreMenu sets how the episode plays: its speed, its definition, when to
  * stop and whether comments fly over it; and saves the series, or opens its
- * page.
+ * page. `search` is there when the bar has no room for its own button.
  */
 @Composable
-private fun MoreMenu(hud: PlayerHud) {
+private fun MoreMenu(hud: PlayerHud, search: (() -> Unit)?) {
     val model = LocalModel.current
     val router = LocalRouter.current
     val player = model.player
@@ -1283,6 +1299,17 @@ private fun MoreMenu(hud: PlayerHud) {
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             when (page) {
                 More.MAIN -> {
+                    if (search != null) {
+                        DropdownMenuItem(
+                            text = { Text("搜索") },
+                            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                            onClick = {
+                                open = false
+                                search()
+                            },
+                        )
+                        HorizontalDivider()
+                    }
                     Entry("倍速", Icons.Filled.Speed, if (player.speed == 1f) "正常" else "${rateText(player.speed)}x") { page = More.SPEED }
                     if (player.qualities.isNotEmpty()) {
                         Entry("清晰度", Icons.Filled.HighQuality, "${player.quality}P") { page = More.QUALITY }
